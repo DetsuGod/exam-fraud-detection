@@ -1,0 +1,1424 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI-Proctor | Hệ Thống Giám Sát Phòng Thi Thông Minh</title>
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+    <!-- Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        :root {
+            --bg-gradient: linear-gradient(135deg, #0a0a16 0%, #0f0c24 50%, #030008 100%);
+            --glass-bg: rgba(13, 12, 34, 0.65);
+            --glass-border: rgba(255, 255, 255, 0.08);
+            --text-primary: #f8fafc;
+            --text-secondary: #94a3b8;
+            --accent-primary: #6366f1; /* Indigo */
+            --accent-glow: rgba(99, 102, 241, 0.35);
+            --success: #10b981; /* Neon green */
+            --success-glow: rgba(16, 185, 129, 0.25);
+            --warning: #f59e0b; /* Orange */
+            --warning-glow: rgba(245, 158, 11, 0.25);
+            --danger: #ef4444; /* Neon red */
+            --danger-glow: rgba(239, 68, 68, 0.4);
+            --font-main: 'Outfit', sans-serif;
+            --font-mono: 'JetBrains Mono', monospace;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: var(--font-main);
+            background: var(--bg-gradient);
+            color: var(--text-primary);
+            min-height: 100vh;
+            overflow-x: hidden;
+            display: flex;
+            flex-direction: column;
+        }
+
+        /* Glassmorphism Background Orbs */
+        .orb {
+            position: absolute;
+            border-radius: 50%;
+            filter: blur(120px);
+            z-index: -1;
+            pointer-events: none;
+        }
+        .orb-1 {
+            width: 400px;
+            height: 400px;
+            background: rgba(99, 102, 241, 0.18);
+            top: 10%;
+            left: 5%;
+        }
+        .orb-2 {
+            width: 500px;
+            height: 500px;
+            background: rgba(239, 68, 68, 0.08);
+            bottom: 10%;
+            right: 5%;
+        }
+        .orb-3 {
+            width: 300px;
+            height: 300px;
+            background: rgba(16, 185, 129, 0.08);
+            top: 40%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+        }
+
+        /* Header Layout */
+        header {
+            padding: 1.25rem 2rem;
+            background: rgba(10, 10, 24, 0.4);
+            backdrop-filter: blur(10px);
+            border-bottom: 1px solid var(--glass-border);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            z-index: 10;
+        }
+
+        .logo-section {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+        }
+
+        .logo-dot {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background: var(--success);
+            box-shadow: 0 0 12px var(--success-glow);
+            animation: pulse-green 2s infinite;
+        }
+
+        @keyframes pulse-green {
+            0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7); }
+            70% { transform: scale(1); box-shadow: 0 0 0 10px rgba(16, 185, 129, 0); }
+            100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); }
+        }
+
+        @keyframes pulse-warning {
+            0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.7); }
+            70% { transform: scale(1); box-shadow: 0 0 0 10px rgba(245, 158, 11, 0); }
+            100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(245, 158, 11, 0); }
+        }
+
+        .logo-section h1 {
+            font-size: 1.5rem;
+            font-weight: 700;
+            letter-spacing: -0.025em;
+            background: linear-gradient(to right, #ffffff, #a5b4fc);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .logo-section span {
+            font-size: 0.75rem;
+            background: rgba(99, 102, 241, 0.2);
+            border: 1px solid var(--accent-primary);
+            padding: 0.15rem 0.5rem;
+            border-radius: 9999px;
+            color: #a5b4fc;
+            font-weight: 600;
+        }
+
+        .session-timer {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+            background: rgba(255, 255, 255, 0.05);
+            padding: 0.5rem 1rem;
+            border-radius: 12px;
+            border: 1px solid var(--glass-border);
+        }
+
+        .timer-label {
+            font-size: 0.75rem;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            font-weight: 600;
+            letter-spacing: 0.05em;
+        }
+
+        .timer-value {
+            font-family: var(--font-mono);
+            font-size: 1.15rem;
+            font-weight: 700;
+            color: #ffffff;
+        }
+
+        /* Container Main */
+        main {
+            flex: 1;
+            display: grid;
+            grid-template-columns: 380px 1fr;
+            gap: 1.5rem;
+            padding: 1.5rem 2rem;
+            max-width: 1800px;
+            width: 100%;
+            margin: 0 auto;
+            position: relative;
+        }
+
+        /* Common Glassmorphic Card */
+        .glass-card {
+            background: var(--glass-bg);
+            border: 1px solid var(--glass-border);
+            border-radius: 16px;
+            padding: 1.5rem;
+            box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.4);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        .glass-card:hover {
+            border-color: rgba(99, 102, 241, 0.2);
+            box-shadow: 0 12px 40px 0 rgba(0, 0, 0, 0.5);
+        }
+
+        .card-title {
+            font-size: 1rem;
+            font-weight: 600;
+            margin-bottom: 1.25rem;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            color: var(--text-primary);
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+            padding-bottom: 0.75rem;
+        }
+
+        /* Left Side Controls & Stats Panel */
+        .sidebar {
+            display: flex;
+            flex-direction: column;
+            gap: 1.5rem;
+        }
+
+        /* Sidebar Control Center Elements */
+        .control-group {
+            margin-bottom: 1.25rem;
+        }
+
+        .control-group:last-child {
+            margin-bottom: 0;
+        }
+
+        .control-label {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+            margin-bottom: 0.5rem;
+            font-weight: 500;
+        }
+
+        /* Styled select */
+        select {
+            width: 100%;
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid var(--glass-border);
+            border-radius: 8px;
+            color: var(--text-primary);
+            padding: 0.65rem;
+            font-family: var(--font-main);
+            font-size: 0.9rem;
+            outline: none;
+            cursor: pointer;
+            transition: border-color 0.2s;
+        }
+
+        select:focus {
+            border-color: var(--accent-primary);
+        }
+
+        /* Styled range slider */
+        .slider-container {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+        }
+
+        input[type="range"] {
+            flex: 1;
+            height: 6px;
+            -webkit-appearance: none;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 3px;
+            outline: none;
+        }
+
+        input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            width: 16px;
+            height: 16px;
+            border-radius: 50%;
+            background: var(--accent-primary);
+            cursor: pointer;
+            box-shadow: 0 0 8px var(--accent-glow);
+            transition: transform 0.1s;
+        }
+
+        input[type="range"]::-webkit-slider-thumb:hover {
+            transform: scale(1.2);
+        }
+
+        .slider-value {
+            font-family: var(--font-mono);
+            font-size: 0.85rem;
+            background: rgba(99, 102, 241, 0.15);
+            color: #a5b4fc;
+            padding: 0.15rem 0.4rem;
+            border-radius: 4px;
+            min-width: 32px;
+            text-align: center;
+        }
+
+        /* Toggle switches */
+        .toggle-container {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 0.5rem 0;
+        }
+
+        .switch {
+            position: relative;
+            display: inline-block;
+            width: 44px;
+            height: 22px;
+        }
+
+        .switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+
+        .slider-switch {
+            position: absolute;
+            cursor: pointer;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: rgba(255, 255, 255, 0.1);
+            transition: .3s;
+            border-radius: 22px;
+            border: 1px solid var(--glass-border);
+        }
+
+        .slider-switch:before {
+            position: absolute;
+            content: "";
+            height: 14px;
+            width: 14px;
+            left: 3px;
+            bottom: 3px;
+            background-color: white;
+            transition: .3s;
+            border-radius: 50%;
+        }
+
+        input:checked + .slider-switch {
+            background-color: var(--accent-primary);
+            box-shadow: 0 0 8px var(--accent-glow);
+        }
+
+        input:checked + .slider-switch:before {
+            transform: translateX(22px);
+        }
+
+        /* Status & Alert Display */
+        .status-display {
+            display: flex;
+            flex-direction: column;
+            gap: 1rem;
+        }
+
+        .status-badge {
+            width: 100%;
+            padding: 0.75rem;
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.5rem;
+            font-weight: 700;
+            font-size: 0.95rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            transition: all 0.3s;
+        }
+
+        .status-offline {
+            background: rgba(148, 163, 184, 0.1);
+            border: 1px solid rgba(148, 163, 184, 0.2);
+            color: var(--text-secondary);
+        }
+
+        .status-safe {
+            background: rgba(16, 185, 129, 0.15);
+            border: 1px solid var(--success);
+            color: var(--success);
+            box-shadow: 0 0 10px rgba(16, 185, 129, 0.1);
+        }
+
+        .status-violating {
+            background: rgba(239, 68, 68, 0.15);
+            border: 1px solid var(--danger);
+            color: var(--danger);
+            box-shadow: 0 0 15px rgba(239, 68, 68, 0.15);
+            animation: pulse-danger-border 1.5s infinite;
+        }
+
+        @keyframes pulse-danger-border {
+            0% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.4); }
+            70% { box-shadow: 0 0 0 10px rgba(239, 68, 68, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); }
+        }
+
+        /* Suspicion Gauge */
+        .suspicion-metric {
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+        }
+
+        .gauge-header {
+            display: flex;
+            justify-content: space-between;
+            font-size: 0.85rem;
+            font-weight: 600;
+        }
+
+        .gauge-bar-bg {
+            height: 12px;
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 6px;
+            overflow: hidden;
+            border: 1px solid var(--glass-border);
+        }
+
+        .gauge-bar-fill {
+            height: 100%;
+            width: 0%;
+            background: linear-gradient(to right, var(--success), var(--warning), var(--danger));
+            transition: width 0.3s ease;
+        }
+
+        /* Counters Cards grid */
+        .counters-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 0.75rem;
+        }
+
+        .counter-card {
+            background: rgba(255, 255, 255, 0.02);
+            border: 1px solid var(--glass-border);
+            padding: 0.75rem 1rem;
+            border-radius: 12px;
+            text-align: center;
+        }
+
+        .counter-label {
+            font-size: 0.7rem;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            font-weight: 600;
+            margin-bottom: 0.25rem;
+        }
+
+        .counter-num {
+            font-family: var(--font-mono);
+            font-size: 1.5rem;
+            font-weight: 700;
+            color: #ffffff;
+        }
+
+        .counter-num.warning-count {
+            color: var(--warning);
+        }
+        .counter-num.danger-count {
+            color: var(--danger);
+        }
+
+        /* Right Side Panels */
+        .main-panel {
+            display: flex;
+            flex-direction: column;
+            gap: 1.5rem;
+        }
+
+        /* Viewport Frame Box */
+        .viewport-container {
+            position: relative;
+            width: 100%;
+            background: #04040a;
+            border: 1px solid var(--glass-border);
+            border-radius: 16px;
+            overflow: hidden;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            box-shadow: inset 0 0 40px rgba(0, 0, 0, 0.8), 0 8px 32px 0 rgba(0, 0, 0, 0.4);
+            aspect-ratio: 4/3;
+            max-height: 550px;
+        }
+
+        #camera-feed {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            transform: scaleX(-1); /* Mirror camera feed */
+            display: none;
+        }
+
+        #canvas-overlay {
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+            display: block;
+        }
+
+        /* Video Fallback Server Stream image */
+        #server-stream-feed {
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+            display: none;
+        }
+
+        .hidden-video {
+            display: none !important;
+        }
+
+        /* Futuristic HUD elements over camera view */
+        .hud-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            pointer-events: none;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            padding: 1.25rem;
+        }
+
+        .hud-top {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+        }
+
+        .hud-badge {
+            background: rgba(4, 4, 10, 0.75);
+            backdrop-filter: blur(4px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            color: #ffffff;
+            font-family: var(--font-mono);
+            font-size: 0.75rem;
+            padding: 0.35rem 0.65rem;
+            border-radius: 6px;
+            display: flex;
+            align-items: center;
+            gap: 0.35rem;
+        }
+
+        .rec-indicator {
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: var(--danger);
+            animation: pulse-danger-border 1s infinite;
+        }
+
+        .hud-bottom {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-end;
+        }
+
+        /* Sci-fi scanner visual overlay effect */
+        .scanner-line {
+            position: absolute;
+            left: 0;
+            right: 0;
+            height: 2px;
+            background: linear-gradient(to right, rgba(99, 102, 241, 0), rgba(99, 102, 241, 0.8), rgba(99, 102, 241, 0));
+            box-shadow: 0 0 12px 4px var(--accent-glow);
+            animation: scan 4s linear infinite;
+            pointer-events: none;
+        }
+
+        @keyframes scan {
+            0% { top: 0%; }
+            50% { top: 100%; }
+            100% { top: 0%; }
+        }
+
+        .start-prompt {
+            position: absolute;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 1rem;
+            z-index: 5;
+        }
+
+        .start-btn {
+            background: linear-gradient(135deg, var(--accent-primary) 0%, #4f46e5 100%);
+            border: none;
+            color: #ffffff;
+            font-family: var(--font-main);
+            font-size: 1rem;
+            font-weight: 600;
+            padding: 0.85rem 2rem;
+            border-radius: 12px;
+            cursor: pointer;
+            box-shadow: 0 4px 15px var(--accent-glow);
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .start-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(99, 102, 241, 0.5);
+        }
+
+        .start-btn:active {
+            transform: translateY(1px);
+        }
+
+        /* Console Logs Area */
+        .logs-panel {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            min-height: 200px;
+            max-height: 300px;
+        }
+
+        .logs-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 0.75rem;
+        }
+
+        .clear-btn {
+            background: none;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            color: var(--text-secondary);
+            font-size: 0.75rem;
+            padding: 0.25rem 0.5rem;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .clear-btn:hover {
+            background: rgba(255, 255, 255, 0.05);
+            color: #ffffff;
+        }
+
+        .logs-container {
+            flex: 1;
+            background: rgba(0, 0, 0, 0.3);
+            border: 1px solid var(--glass-border);
+            border-radius: 8px;
+            padding: 0.75rem;
+            overflow-y: auto;
+            font-family: var(--font-mono);
+            font-size: 0.8rem;
+            line-height: 1.5;
+            display: flex;
+            flex-direction: column;
+            gap: 0.4rem;
+        }
+
+        .log-entry {
+            display: grid;
+            grid-template-columns: 85px 1fr;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.02);
+            padding-bottom: 0.25rem;
+        }
+
+        .log-time {
+            color: #64748b;
+        }
+
+        .log-text {
+            word-break: break-all;
+        }
+
+        .log-text.normal { color: var(--success); }
+        .log-text.warning { color: var(--warning); }
+        .log-text.danger { color: var(--danger); }
+        .log-text.system { color: #38bdf8; }
+
+        /* Chart container */
+        .chart-container {
+            width: 100%;
+            height: 140px;
+        }
+
+        /* Footer */
+        footer {
+            text-align: center;
+            padding: 1rem;
+            font-size: 0.75rem;
+            color: var(--text-secondary);
+            border-top: 1px solid var(--glass-border);
+            margin-top: auto;
+            background: rgba(5, 5, 12, 0.5);
+        }
+
+        footer a {
+            color: #a5b4fc;
+            text-decoration: none;
+        }
+
+        footer a:hover {
+            text-decoration: underline;
+        }
+
+        /* Responsive */
+        @media (max-width: 992px) {
+            main {
+                grid-template-columns: 1fr;
+            }
+            .sidebar {
+                order: 2;
+            }
+            .main-panel {
+                order: 1;
+            }
+        }
+    </style>
+</head>
+<body>
+
+    <div class="orb orb-1"></div>
+    <div class="orb orb-2"></div>
+    <div class="orb orb-3"></div>
+
+    <header>
+        <div class="logo-section">
+            <div class="logo-dot" id="system-status-dot"></div>
+            <h1>AI-Proctor</h1>
+            <span>YOLOv8 Active</span>
+        </div>
+        <div class="session-timer">
+            <span class="timer-label">Thời gian giám sát</span>
+            <span class="timer-value" id="timer-display">00:00:00</span>
+        </div>
+    </header>
+
+    <main>
+        <!-- Sidebar Controls & Stats -->
+        <div class="sidebar">
+            
+            <!-- Realtime Proctoring Status -->
+            <div class="glass-card">
+                <div class="card-title">
+                    TRẠNG THÁI GIÁM SÁT
+                </div>
+                <div class="status-display">
+                    <div class="status-badge status-offline" id="status-badge">
+                        CHƯA KẾT NỐI
+                    </div>
+                    
+                    <div class="suspicion-metric">
+                        <div class="gauge-header">
+                            <span>Chỉ Số Nghi Vấn (Suspicion)</span>
+                            <span id="suspicion-text">0%</span>
+                        </div>
+                        <div class="gauge-bar-bg">
+                            <div class="gauge-bar-fill" id="suspicion-fill"></div>
+                        </div>
+                    </div>
+
+                    <div class="counters-grid">
+                        <div class="counter-card">
+                            <div class="counter-label">Thí sinh</div>
+                            <div class="counter-num" id="count-persons">0</div>
+                        </div>
+                        <div class="counter-card">
+                            <div class="counter-label">Điện thoại</div>
+                            <div class="counter-num danger-count" id="count-phones">0</div>
+                        </div>
+                        <div class="counter-card">
+                            <div class="counter-label">Tài liệu</div>
+                            <div class="counter-num warning-count" id="count-books">0</div>
+                        </div>
+                        <div class="counter-card">
+                            <div class="counter-label">Laptop</div>
+                            <div class="counter-num warning-count" id="count-laptops">0</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Control Center -->
+            <div class="glass-card">
+                <div class="card-title">
+                    BẢNG ĐIỀU KHIỂN
+                </div>
+                
+                <div class="control-group">
+                    <div class="control-label">Nguồn Camera</div>
+                    <select id="camera-source">
+                        <option value="client">Webcam Trình Duyệt (Khuyên dùng)</option>
+                        <option value="server">Webcam Máy Chủ (Local USB)</option>
+                    </select>
+                </div>
+
+                <div class="control-group">
+                    <div class="control-label">
+                        <span>Độ Nhạy (CONF Threshold)</span>
+                        <span class="slider-value" id="conf-val">0.35</span>
+                    </div>
+                    <div class="slider-container">
+                        <input type="range" id="conf-slider" min="0.10" max="0.90" step="0.05" value="0.35">
+                    </div>
+                </div>
+
+                <div class="control-group" style="margin-top: 1rem;">
+                    <div class="toggle-container">
+                        <span style="font-size: 0.9rem;">Còi Báo Động</span>
+                        <label class="switch">
+                            <input type="checkbox" id="toggle-sound" checked>
+                            <span class="slider-switch"></span>
+                        </label>
+                    </div>
+                    
+                    <div class="toggle-container">
+                        <span style="font-size: 0.9rem;">Giọng Nói Cảnh Báo (AI Voice)</span>
+                        <label class="switch">
+                            <input type="checkbox" id="toggle-voice" checked>
+                            <span class="slider-switch"></span>
+                        </label>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Exam Session Control -->
+            <div class="glass-card">
+                <div class="card-title">
+                    PHIÊN THI GIÁM SÁT
+                    <span class="logo-dot" id="exam-status-dot" style="background: var(--text-secondary); box-shadow: none; animation: none;"></span>
+                </div>
+                <div style="display: flex; flex-direction: column; gap: 0.75rem;">
+                    <button id="exam-session-btn" class="start-btn" style="width: 100%; justify-content: center; background: linear-gradient(135deg, var(--success) 0%, #059669 100%); box-shadow: 0 4px 15px var(--success-glow); opacity: 0.6; cursor: not-allowed;" disabled>
+                        <svg width="18" height="18" fill="currentColor" viewBox="0 0 24 24" style="margin-right: 0.25rem;">
+                            <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 14.5v-9l6 4.5-6 4.5z"/>
+                        </svg>
+                        Bắt Đầu Phiên Thi
+                    </button>
+                    <div id="exam-session-status-text" style="font-size: 0.85rem; text-align: center; color: var(--text-secondary); font-weight: 500;">
+                        Chưa bắt đầu giám sát camera
+                    </div>
+                </div>
+            </div>
+
+            <!-- Dashboard Analytics Mini Chart -->
+            <div class="glass-card">
+                <div class="card-title">
+                    BIỂU ĐỒ NGHI VẤN
+                </div>
+                <div class="chart-container">
+                    <canvas id="metricsChart"></canvas>
+                </div>
+            </div>
+
+        </div>
+
+        <!-- Main Proctor Viewport & Logs -->
+        <div class="main-panel">
+            
+            <!-- Video Viewport Frame -->
+            <div class="viewport-container" id="viewport">
+                <!-- Browser Webcam element -->
+                <video id="camera-feed" autoplay playsinline class="hidden-video"></video>
+                <!-- Render processed frames from WebSocket server -->
+                <img id="canvas-overlay" alt="Live Processing Output" src="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='640' height='480' viewBox='0 0 640 480'><rect width='640' height='480' fill='%23050510'/><text x='50%25' y='50%25' fill='%2364748b' dominant-baseline='middle' text-anchor='middle' font-family='sans-serif' font-size='16'>NHẤN 'BẮT ĐẦU GIÁM SÁT' ĐỂ MỞ CAMERA</text></svg>">
+                <!-- Fallback Direct MJPEG Server Image -->
+                <img id="server-stream-feed" alt="Server Video Feed">
+
+                <!-- HUD overlays -->
+                <div class="hud-overlay" id="hud-overlay" style="display: none;">
+                    <div class="hud-top">
+                        <div class="hud-badge">
+                            <div class="rec-indicator"></div>
+                            <span>MONITORING: LIVE</span>
+                        </div>
+                        <div class="hud-badge" id="hud-fps">
+                            <span>FPS: --</span>
+                        </div>
+                    </div>
+                    <div class="scanner-line" id="scanner-line"></div>
+                    <div class="hud-bottom">
+                        <div class="hud-badge">
+                            <span>RESO: 640x480</span>
+                        </div>
+                        <div class="hud-badge" id="hud-latency">
+                            <span>LAT: -- ms</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Initial Start Button -->
+                <div class="start-prompt" id="start-prompt">
+                    <button class="start-btn" id="start-proctoring-btn">
+                        <svg width="20" height="20" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+                        Bắt Đầu Giám Sát
+                    </button>
+                </div>
+            </div>
+
+            <!-- Console Incident Logs -->
+            <div class="glass-card logs-panel">
+                <div class="logs-header">
+                    <span style="font-weight: 600; font-size: 0.95rem;">LỊCH SỬ VI PHẠM (LOGS)</span>
+                    <button class="clear-btn" id="clear-logs-btn">Xóa Lịch Sử</button>
+                </div>
+                <div class="logs-container" id="logs-container">
+                    <div class="log-entry">
+                        <span class="log-time" id="init-log-time">--:--:--</span>
+                        <span class="log-text system">Hệ thống sẵn sàng. Vui lòng bấm Bắt Đầu để khởi chạy camera.</span>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+    </main>
+
+    <footer>
+        AI Exam Proctoring System v1.0.0 &copy; 2026 | Sử dụng **YOLOv8 Pretrained** & **FastAPI**
+    </footer>
+
+    <script>
+        // Session state variables
+        let proctoringActive = false;
+        let examActive = false;
+        let wsConnection = null;
+        let localStream = null;
+        let timerInterval = null;
+        let totalSeconds = 0;
+        let lastFrameTime = performance.now();
+        let frameInterval = null;
+        
+        // Voice alert throttling
+        let lastVoiceTime = 0;
+        const VOICE_COOLDOWN = 6000; // Say warnings once every 6s
+
+        // UI references
+        const startBtn = document.getElementById("start-proctoring-btn");
+        const startPrompt = document.getElementById("start-prompt");
+        const hudOverlay = document.getElementById("hud-overlay");
+        const statusBadge = document.getElementById("status-badge");
+        const systemStatusDot = document.getElementById("system-status-dot");
+        const cameraFeed = document.getElementById("camera-feed");
+        const canvasOverlay = document.getElementById("canvas-overlay");
+        const serverStreamFeed = document.getElementById("server-stream-feed");
+        const cameraSource = document.getElementById("camera-source");
+        const confSlider = document.getElementById("conf-slider");
+        const confVal = document.getElementById("conf-val");
+        const toggleSound = document.getElementById("toggle-sound");
+        const toggleVoice = document.getElementById("toggle-voice");
+        const suspicionFill = document.getElementById("suspicion-fill");
+        const suspicionText = document.getElementById("suspicion-text");
+        const countPersons = document.getElementById("count-persons");
+        const countPhones = document.getElementById("count-phones");
+        const countBooks = document.getElementById("count-books");
+        const countLaptops = document.getElementById("count-laptops");
+        const timerDisplay = document.getElementById("timer-display");
+        const logsContainer = document.getElementById("logs-container");
+        const clearLogsBtn = document.getElementById("clear-logs-btn");
+        const hudFps = document.getElementById("hud-fps");
+        const hudLatency = document.getElementById("hud-latency");
+
+        // Exam UI references
+        const examSessionBtn = document.getElementById("exam-session-btn");
+        const examSessionStatusText = document.getElementById("exam-session-status-text");
+        const examStatusDot = document.getElementById("exam-status-dot");
+
+        // Set initial time on log
+        document.getElementById("init-log-time").innerText = getTimestamp();
+
+        // Chart Setup
+        const chartCtx = document.getElementById('metricsChart').getContext('2d');
+        const metricsChart = new Chart(chartCtx, {
+            type: 'line',
+            data: {
+                labels: Array(20).fill(''),
+                datasets: [{
+                    label: 'Mức độ nghi vấn (%)',
+                    data: Array(20).fill(0),
+                    borderColor: '#6366f1',
+                    borderWidth: 2,
+                    backgroundColor: 'rgba(99, 102, 241, 0.1)',
+                    fill: true,
+                    tension: 0.4,
+                    pointRadius: 0
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: { legend: { display: false } },
+                scales: {
+                    x: { display: false },
+                    y: {
+                        min: 0,
+                        max: 100,
+                        grid: { color: 'rgba(255, 255, 255, 0.05)' },
+                        ticks: { color: '#64748b', font: { size: 9 } }
+                    }
+                }
+            }
+        });
+
+        // Event Listeners
+        startBtn.addEventListener("click", toggleProctoring);
+        examSessionBtn.addEventListener("click", toggleExamSession);
+        cameraSource.addEventListener("change", handleSourceChange);
+        confSlider.addEventListener("input", (e) => {
+            confVal.innerText = e.target.value;
+        });
+        clearLogsBtn.addEventListener("click", () => {
+            logsContainer.innerHTML = '';
+            addLog("Hệ thống", "Đã xóa toàn bộ lịch sử log.", "system");
+        });
+
+        // Helper to format timestamps
+        function getTimestamp() {
+            const now = new Date();
+            return now.toTimeString().split(' ')[0];
+        }
+
+        // Add Log to terminal
+        function addLog(source, text, type = 'normal') {
+            const entry = document.createElement("div");
+            entry.className = "log-entry";
+            entry.innerHTML = `
+                <span class="log-time">${getTimestamp()}</span>
+                <span class="log-text ${type}">[${source}] ${text}</span>
+            `;
+            logsContainer.appendChild(entry);
+            logsContainer.scrollTop = logsContainer.scrollHeight;
+        }
+
+        // Web Audio Synthesizer for alarm beeps (no audio assets required!)
+        function triggerBeep(freq = 880, duration = 0.3) {
+            if (!toggleSound.checked) return;
+            try {
+                const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+                const osc = audioCtx.createOscillator();
+                const gain = audioCtx.createGain();
+                
+                osc.connect(gain);
+                gain.connect(audioCtx.destination);
+                
+                osc.type = 'sawtooth';
+                osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
+                gain.gain.setValueAtTime(0.15, audioCtx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + duration);
+                
+                osc.start(audioCtx.currentTime);
+                osc.stop(audioCtx.currentTime + duration);
+            } catch (e) {
+                console.error("Audio Context error:", e);
+            }
+        }
+
+        // AI Text-to-speech alarm
+        function speakAlert(text) {
+            if (!toggleVoice.checked) return;
+            const now = performance.now();
+            if (now - lastVoiceTime < VOICE_COOLDOWN) return; // Cooldown active
+
+            if ('speechSynthesis' in window) {
+                window.speechSynthesis.cancel(); // Stop current speech
+                const utterance = new SpeechSynthesisUtterance(text);
+                utterance.lang = 'vi-VN';
+                utterance.rate = 1.0;
+                window.speechSynthesis.speak(utterance);
+                lastVoiceTime = now;
+            }
+        }
+
+        // Update Dashboard Chart
+        function updateChart(newSuspicion) {
+            metricsChart.data.datasets[0].data.shift();
+            metricsChart.data.datasets[0].data.push(newSuspicion);
+            metricsChart.update();
+        }
+
+        // Timer controller
+        function startTimer() {
+            totalSeconds = 0;
+            timerDisplay.innerText = "00:00:00";
+            timerInterval = setInterval(() => {
+                totalSeconds++;
+                const hrs = String(Math.floor(totalSeconds / 3600)).padStart(2, '0');
+                const mins = String(Math.floor((totalSeconds % 3600) / 60)).padStart(2, '0');
+                const secs = String(totalSeconds % 60).padStart(2, '0');
+                timerDisplay.innerText = `${hrs}:${mins}:${secs}`;
+            }, 1000);
+        }
+
+        function stopTimer() {
+            clearInterval(timerInterval);
+        }
+
+        // Source Switch Handler
+        function handleSourceChange() {
+            if (proctoringActive) {
+                // If actively proctoring, hot-restart stream
+                toggleProctoring();
+                setTimeout(toggleProctoring, 500);
+            }
+        }
+
+        // Main Toggle Trigger
+        async function toggleProctoring() {
+            if (!proctoringActive) {
+                // START proctoring
+                proctoringActive = true;
+                startPrompt.style.display = "none";
+                hudOverlay.style.display = "flex";
+                startBtn.innerHTML = `<svg width="20" height="20" fill="currentColor" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12"/></svg> Dừng Giám Sát`;
+                startBtn.style.background = "linear-gradient(135deg, #ef4444 0%, #dc2626 100%)";
+                startBtn.style.boxShadow = "0 4px 15px rgba(239, 68, 68, 0.4)";
+                
+                statusBadge.innerText = "ĐANG KHỞI CHẠY...";
+                statusBadge.className = "status-badge status-offline";
+                systemStatusDot.style.background = "#f59e0b";
+
+                addLog("Hệ thống", "Đang khởi tạo phiên giám sát...", "system");
+                startTimer();
+                
+                // Enable Exam Session Button
+                examSessionBtn.disabled = false;
+                examSessionBtn.style.opacity = "1";
+                examSessionBtn.style.cursor = "pointer";
+                examSessionStatusText.innerText = "Sẵn sàng bắt đầu phiên thi";
+                examSessionStatusText.style.color = "var(--text-secondary)";
+                
+                const source = cameraSource.value;
+                if (source === "client") {
+                    await startClientProctoring();
+                } else {
+                    startServerProctoring();
+                }
+            } else {
+                // STOP proctoring
+                proctoringActive = false;
+                startPrompt.style.display = "flex";
+                hudOverlay.style.display = "none";
+                startBtn.innerHTML = `<svg width="20" height="20" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg> Bắt Đầu Giám Sát`;
+                startBtn.style.background = "linear-gradient(135deg, #6366f1 0%, #4f46e5 100%)";
+                startBtn.style.boxShadow = "0 4px 15px rgba(99, 102, 241, 0.35)";
+                
+                statusBadge.innerText = "CHƯA KẾT NỐI";
+                statusBadge.className = "status-badge status-offline";
+                systemStatusDot.style.background = "rgba(148, 163, 184, 0.8)";
+                systemStatusDot.style.boxShadow = "none";
+
+                addLog("Hệ thống", "Phiên giám sát kết thúc.", "system");
+                
+                // Disable Exam Session Button and force stop if active
+                if (examActive) {
+                    toggleExamSession();
+                }
+                examSessionBtn.disabled = true;
+                examSessionBtn.style.opacity = "0.6";
+                examSessionBtn.style.cursor = "not-allowed";
+                examSessionStatusText.innerText = "Chưa bắt đầu giám sát camera";
+                examSessionStatusText.style.color = "var(--text-secondary)";
+                
+                stopTimer();
+                stopClientProctoring();
+                stopServerProctoring();
+                resetMetrics();
+            }
+        }
+
+        // Toggle Exam Session Active State
+        function toggleExamSession() {
+            if (!proctoringActive) return;
+            
+            if (!examActive) {
+                // START Exam Session
+                examActive = true;
+                examSessionBtn.innerHTML = `<svg width="18" height="18" fill="currentColor" viewBox="0 0 24 24" style="margin-right: 0.25rem;"><rect x="6" y="6" width="12" height="12"/></svg> Kết Thúc Phiên Thi`;
+                examSessionBtn.style.background = "linear-gradient(135deg, #ef4444 0%, #dc2626 100%)";
+                examSessionBtn.style.boxShadow = "0 4px 15px rgba(239, 68, 68, 0.4)";
+                
+                examSessionStatusText.innerText = "Phiên thi đang diễn ra...";
+                examSessionStatusText.style.color = "var(--danger)";
+                
+                examStatusDot.style.background = "var(--danger)";
+                examStatusDot.style.boxShadow = "0 0 10px var(--danger-glow)";
+                examStatusDot.style.animation = "pulse-warning 1.5s infinite";
+                
+                addLog("Phiên thi", "ĐÃ BẮT ĐẦU PHIÊN THI. Danh sách thí sinh đã khóa. Đang giám sát vị trí!", "system");
+                triggerBeep(1000, 0.4);
+                speakAlert("Phiên thi đã bắt đầu. Hệ thống bắt đầu giám sát thí sinh.");
+            } else {
+                // STOP Exam Session
+                examActive = false;
+                examSessionBtn.innerHTML = `<svg width="18" height="18" fill="currentColor" viewBox="0 0 24 24" style="margin-right: 0.25rem;"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 14.5v-9l6 4.5-6 4.5z"/></svg> Bắt Đầu Phiên Thi`;
+                examSessionBtn.style.background = "linear-gradient(135deg, var(--success) 0%, #059669 100%)";
+                examSessionBtn.style.boxShadow = "0 4px 15px var(--success-glow)";
+                
+                examSessionStatusText.innerText = "Sẵn sàng bắt đầu phiên thi";
+                examSessionStatusText.style.color = "var(--text-secondary)";
+                
+                examStatusDot.style.background = "var(--text-secondary)";
+                examStatusDot.style.boxShadow = "none";
+                examStatusDot.style.animation = "none";
+                
+                addLog("Phiên thi", "Đã kết thúc phiên thi.", "system");
+                triggerBeep(600, 0.2);
+                speakAlert("Đã kết thúc phiên thi.");
+            }
+        }
+
+        // Stop all active tracks on client webcam
+        function stopClientProctoring() {
+            if (frameInterval) clearInterval(frameInterval);
+            if (localStream) {
+                localStream.getTracks().forEach(track => track.stop());
+                localStream = null;
+            }
+            cameraFeed.srcObject = null;
+            cameraFeed.style.display = "none";
+            canvasOverlay.style.display = "block";
+            canvasOverlay.src = "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='640' height='480' viewBox='0 0 640 480'><rect width='640' height='480' fill='%23050510'/><text x='50%25' y='50%25' fill='%2364748b' dominant-baseline='middle' text-anchor='middle' font-family='sans-serif' font-size='16'>HỆ THỐNG ĐÃ DỪNG GIÁM SÁT</text></svg>";
+            
+            if (wsConnection) {
+                wsConnection.close();
+                wsConnection = null;
+            }
+        }
+
+        // Start local client stream & connect WebSocket
+        async function startClientProctoring() {
+            cameraFeed.style.display = "none";
+            canvasOverlay.style.display = "block";
+            
+            // Connect to WebSocket Server
+            const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+            const wsUrl = `${protocol}//${window.location.host}/ws/stream`;
+            
+            addLog("Hệ thống", "Đang mở kết nối WebSocket...", "system");
+            wsConnection = new WebSocket(wsUrl);
+            
+            wsConnection.onopen = async () => {
+                addLog("Hệ thống", "Kết nối WebSocket thành công. Đang kích hoạt camera...", "system");
+                
+                try {
+                    // Start Webcam
+                    localStream = await navigator.mediaDevices.getUserMedia({
+                        video: { width: 640, height: 480 }
+                    });
+                    cameraFeed.srcObject = localStream;
+                    cameraFeed.style.display = "none"; // Hide raw camera, only show processing canvas overlay
+                    
+                    // Start streaming loop
+                    const hiddenCanvas = document.createElement("canvas");
+                    hiddenCanvas.width = 640;
+                    hiddenCanvas.height = 480;
+                    const ctx = hiddenCanvas.getContext("2d");
+                    
+                    addLog("Hệ thống", "Đang phân tích luồng video...", "system");
+                    
+                    // Live streaming loop
+                    let lastFrameTime = performance.now();
+                    
+                    frameInterval = setInterval(() => {
+                        if (!proctoringActive || wsConnection.readyState !== WebSocket.OPEN) return;
+                        
+                        // Draw current webcam frame to hidden canvas (mirror effect applied during local draw if needed)
+                        // In this case, we draw directly to canvas, and mirrors can be done via CSS if desired.
+                        ctx.drawImage(cameraFeed, 0, 0, 640, 480);
+                        
+                        // Convert canvas to jpeg base64
+                        const imgBase64 = hiddenCanvas.toDataURL("image/jpeg", 0.65);
+                        
+                        // Prepare payload and send
+                        const payload = {
+                            image: imgBase64,
+                            threshold: confSlider.value,
+                            exam_active: examActive
+                        };
+                        
+                        wsConnection.send(JSON.stringify(payload));
+                        lastFrameTime = performance.now();
+                    }, 120); // ~8 FPS reduces local CPU load while maintaining fast reactions
+                    
+                } catch (err) {
+                    console.error("Camera activation error: ", err);
+                    addLog("Camera", "Lỗi: Không thể truy cập webcam. Hãy cấp quyền camera.", "danger");
+                    toggleProctoring(); // turn off
+                }
+            };
+            
+            wsConnection.onmessage = (event) => {
+                const response = JSON.parse(event.data);
+                const frameSrc = response.image;
+                const metrics = response.metrics;
+                
+                // Calculate performance latency
+                const lat = Math.round(performance.now() - lastFrameTime);
+                hudLatency.innerText = `LAT: ${lat} ms`;
+                hudFps.innerText = `FPS: ${Math.round(1000 / lat)}`;
+                
+                // Draw YOLOv8 processed image onto viewport
+                canvasOverlay.src = frameSrc;
+                
+                // Update stats and violations
+                updateProctoringMetrics(metrics);
+            };
+            
+            wsConnection.onerror = (e) => {
+                console.error("WebSocket error: ", e);
+                addLog("WebSocket", "Lỗi đường truyền WebSocket.", "danger");
+            };
+            
+            wsConnection.onclose = () => {
+                addLog("WebSocket", "Đã ngắt kết nối WebSocket.", "system");
+                if (proctoringActive) {
+                    toggleProctoring();
+                }
+            };
+        }
+
+        // Server Side fallback stream
+        function startServerProctoring() {
+            cameraFeed.style.display = "none";
+            canvasOverlay.style.display = "none";
+            serverStreamFeed.style.display = "block";
+            
+            // Set MJPEG source
+            serverStreamFeed.src = "/video_feed";
+            
+            statusBadge.innerText = "MONITOR ACTIVE";
+            statusBadge.className = "status-badge status-safe";
+            systemStatusDot.style.background = "var(--success)";
+            
+            addLog("Hệ thống", "Đang nhận luồng video trực tiếp từ Máy chủ...", "system");
+            
+            // Poll analytics metrics periodically since Server MJPEG doesn't push telemetry via HTTP websocket
+            let lastViolationLength = 0;
+            frameInterval = setInterval(async () => {
+                // Since this is a simple fallback, we just simulate status or do standard log.
+                // In actual server-side, you'd typically have telemetry, but websocket is client webcam.
+                hudLatency.innerText = `LAT: Server`;
+                hudFps.innerText = `FPS: ~25`;
+            }, 1000);
+        }
+
+        function stopServerProctoring() {
+            if (frameInterval) clearInterval(frameInterval);
+            serverStreamFeed.src = "";
+            serverStreamFeed.style.display = "none";
+        }
+
+        // Update UI with latest detection metrics
+        let lastViolations = [];
+        
+        function updateProctoringMetrics(metrics) {
+            // Numbers updating
+            countPersons.innerText = metrics.num_persons;
+            countPhones.innerText = metrics.num_phones;
+            countBooks.innerText = metrics.num_books;
+            countLaptops.innerText = metrics.num_laptops;
+            
+            // Suspicion score
+            const suspicion = metrics.suspicion_index;
+            suspicionText.innerText = `${suspicion}%`;
+            suspicionFill.style.width = `${suspicion}%`;
+            
+            // Chart update
+            updateChart(suspicion);
+            
+            // Badge & system indicators
+            if (metrics.violations.length > 0) {
+                statusBadge.innerText = "PHÁT HIỆN VI PHẠM!";
+                statusBadge.className = "status-badge status-violating";
+                systemStatusDot.style.background = "var(--danger)";
+                systemStatusDot.style.boxShadow = "0 0 10px var(--danger-glow)";
+                
+                // Sound and audio alarms
+                if (metrics.num_phones > 0) {
+                    triggerBeep(1200, 0.4); // high beep
+                    speakAlert("Cảnh báo. Thí sinh sử dụng điện thoại di động!");
+                } else if (metrics.num_persons > 1) {
+                    triggerBeep(700, 0.2);
+                    speakAlert("Cảnh báo. Phát hiện có nhiều người trong phòng thi!");
+                } else if (metrics.num_persons === 0) {
+                    triggerBeep(500, 0.2);
+                    speakAlert("Cảnh báo. Thí sinh đã rời khỏi màn hình!");
+                } else if (metrics.num_books > 0 || metrics.num_laptops > 0) {
+                    triggerBeep(800, 0.3);
+                    speakAlert("Cảnh báo. Phát hiện tài liệu không được phép!");
+                }
+            } else {
+                statusBadge.innerText = "BÌNH THƯỜNG (AN TOÀN)";
+                statusBadge.className = "status-badge status-safe";
+                systemStatusDot.style.background = "var(--success)";
+                systemStatusDot.style.boxShadow = "0 0 10px var(--success-glow)";
+            }
+            
+            // Check for new violations to log
+            metrics.violations.forEach(v => {
+                if (!lastViolations.includes(v)) {
+                    addLog("Cảnh báo", v, "danger");
+                    triggerBeep(900, 0.15);
+                }
+            });
+            
+            // Clear violations logging if solved
+            lastViolations = metrics.violations;
+        }
+
+        // Reset variables and display on session clear
+        function resetMetrics() {
+            countPersons.innerText = "0";
+            countPhones.innerText = "0";
+            countBooks.innerText = "0";
+            countLaptops.innerText = "0";
+            suspicionText.innerText = "0%";
+            suspicionFill.style.width = "0%";
+            hudLatency.innerText = "LAT: -- ms";
+            hudFps.innerText = "FPS: --";
+            metricsChart.data.datasets[0].data.fill(0);
+            metricsChart.update();
+            lastViolations = [];
+        }
+    </script>
+</body>
+</html>
