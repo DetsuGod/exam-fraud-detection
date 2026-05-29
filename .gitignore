@@ -1,0 +1,22 @@
+# Virtual environment
+.venv/
+env/
+venv/
+ENV/
+
+# Python Cache
+__pycache__/
+app/__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# YOLO & Datasets
+dataset/
+runs/
+*.pt
+*.onnx
+
+# Other temp/test files
+.cph/
+test_s3.jpg
