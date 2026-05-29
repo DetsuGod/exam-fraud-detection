@@ -303,18 +303,14 @@ async def lifespan(app: FastAPI):
     print("[STARTUP] Loading normal base model (yolov8n.pt)...")
     model = YOLO("yolov8n.pt")
         
-    # 2. Load custom trained model (best.onnx or best.pt)
+    # 2. Load custom trained model (best.pt)
     custom_pt_path = os.path.join(os.path.dirname(BASE_DIR), "best.pt")
-    custom_onnx_path = os.path.join(os.path.dirname(BASE_DIR), "best.onnx")
     
-    if os.path.exists(custom_onnx_path):
-        print(f"[STARTUP] Found custom optimized ONNX model at: {custom_onnx_path}. Loading ONNX...")
-        custom_model = YOLO(custom_onnx_path, task="detect")
-    elif os.path.exists(custom_pt_path):
+    if os.path.exists(custom_pt_path):
         print(f"[STARTUP] Found custom trained PyTorch model at: {custom_pt_path}. Loading PyTorch...")
         custom_model = YOLO(custom_pt_path)
     else:
-        print("[STARTUP] Custom trained model (best.pt / best.onnx) not found. Using base model only.")
+        print("[STARTUP] Custom trained model ('best.pt') not found. Using base model only.")
         custom_model = None
         
     print("[STARTUP] Models loaded successfully.")
@@ -444,6 +440,30 @@ async def websocket_stream(websocket: WebSocket):
                     elif cls == 1:
                         mapped_cls = 73
                     else:
+                        continue
+                        
+                    # Prevent false positives where the custom model misclassifies a person as a phone/book.
+                    # If the custom box overlaps heavily with a candidate's person box (IoU > 0.30)
+                    # or takes up too much of the person box area (area_ratio > 0.30), it is a false positive.
+                    is_false_positive = False
+                    for p_box, _ in person_detections:
+                        xA = max(p_box[0], coords[0])
+                        yA = max(p_box[1], coords[1])
+                        xB = min(p_box[2], coords[2])
+                        yB = min(p_box[3], coords[3])
+                        
+                        interArea = max(0, xB - xA) * max(0, yB - yA)
+                        p_area = (p_box[2] - p_box[0]) * (p_box[3] - p_box[1])
+                        c_area = (coords[2] - coords[0]) * (coords[3] - coords[1])
+                        
+                        iou = interArea / float(p_area + c_area - interArea + 1e-6)
+                        area_ratio = c_area / float(p_area + 1e-6)
+                        
+                        if iou > 0.30 or area_ratio > 0.30:
+                            is_false_positive = True
+                            break
+                            
+                    if is_false_positive:
                         continue
                     
                     other_boxes.append({
@@ -699,6 +719,29 @@ def get_video_feed():
                                 mapped_cls = 73
                             else:
                                 continue
+                                
+                            # Prevent false positives where the custom model misclassifies a person as a phone/book.
+                            is_false_positive = False
+                            for p_box, _ in person_detections:
+                                xA = max(p_box[0], coords[0])
+                                yA = max(p_box[1], coords[1])
+                                xB = min(p_box[2], coords[2])
+                                yB = min(p_box[3], coords[3])
+                                
+                                interArea = max(0, xB - xA) * max(0, yB - yA)
+                                p_area = (p_box[2] - p_box[0]) * (p_box[3] - p_box[1])
+                                c_area = (coords[2] - coords[0]) * (coords[3] - coords[1])
+                                
+                                iou = interArea / float(p_area + c_area - interArea + 1e-6)
+                                area_ratio = c_area / float(p_area + 1e-6)
+                                
+                                if iou > 0.30 or area_ratio > 0.30:
+                                    is_false_positive = True
+                                    break
+                                    
+                            if is_false_positive:
+                                continue
+                                
                             other_detections.append((coords, conf, mapped_cls))
                     else:
                         # Fallback to standard base model only
