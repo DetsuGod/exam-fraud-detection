@@ -299,16 +299,9 @@ async def lifespan(app: FastAPI):
     # Startup
     global model, custom_model
     
-    # 1. Load base model (yolov8s.pt)
-    base_s_path = os.path.join(os.path.dirname(BASE_DIR), "yolov8s.pt")
-    base_n_path = "yolov8n.pt"
-    
-    if os.path.exists(base_s_path):
-        print(f"[STARTUP] Found yolov8s.pt in root. Loading as base model: {base_s_path}")
-        model = YOLO(base_s_path)
-    else:
-        print("[STARTUP] yolov8s.pt not found in root. Falling back to yolov8n.pt...")
-        model = YOLO(base_n_path)
+    # 1. Load base model (yolov8n.pt) - Normal, lightweight CPU model
+    print("[STARTUP] Loading normal base model (yolov8n.pt)...")
+    model = YOLO("yolov8n.pt")
         
     # 2. Load custom trained model (best.pt or best.onnx)
     custom_pt_path = os.path.join(os.path.dirname(BASE_DIR), "best.pt")
