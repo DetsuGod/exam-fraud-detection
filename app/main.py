@@ -303,16 +303,16 @@ async def lifespan(app: FastAPI):
     print("[STARTUP] Loading normal base model (yolov8n.pt)...")
     model = YOLO("yolov8n.pt")
         
-    # 2. Load custom trained model (best.pt or best.onnx)
+    # 2. Load custom trained model (best.onnx or best.pt)
     custom_pt_path = os.path.join(os.path.dirname(BASE_DIR), "best.pt")
     custom_onnx_path = os.path.join(os.path.dirname(BASE_DIR), "best.onnx")
     
-    if os.path.exists(custom_pt_path):
-        print(f"[STARTUP] Found custom trained PyTorch model at: {custom_pt_path}. Loading...")
-        custom_model = YOLO(custom_pt_path)
-    elif os.path.exists(custom_onnx_path):
-        print(f"[STARTUP] Found custom optimized ONNX model at: {custom_onnx_path}. Loading...")
+    if os.path.exists(custom_onnx_path):
+        print(f"[STARTUP] Found custom optimized ONNX model at: {custom_onnx_path}. Loading ONNX...")
         custom_model = YOLO(custom_onnx_path, task="detect")
+    elif os.path.exists(custom_pt_path):
+        print(f"[STARTUP] Found custom trained PyTorch model at: {custom_pt_path}. Loading PyTorch...")
+        custom_model = YOLO(custom_pt_path)
     else:
         print("[STARTUP] Custom trained model (best.pt / best.onnx) not found. Using base model only.")
         custom_model = None
@@ -401,11 +401,13 @@ async def websocket_stream(websocket: WebSocket):
             
             if custom_model is not None:
                 # 1. Base model for Person (0) and Laptop (63)
+                # Optimize CPU latency by resizing base model input to imgsz=320
                 results_base = model.predict(
                     source=frame,
                     classes=[0, 63],
                     conf=conf_threshold,
-                    verbose=False
+                    verbose=False,
+                    imgsz=320
                 )
                 for box in results_base[0].boxes:
                     coords = box.xyxy[0].tolist()
@@ -421,12 +423,14 @@ async def websocket_stream(websocket: WebSocket):
                         })
                 
                 # 2. Custom model for Mobile phone (0) and Book (1)
-                # Slightly higher confidence threshold (min 0.40) to prevent false alerts
+                # Run custom model with imgsz=416 (matching training size) for 3x speedup.
+                # Use a high confidence threshold (min 0.55) to strictly eliminate false positives (detecting person/face as phone).
                 results_custom = custom_model.predict(
                     source=frame,
                     classes=[0, 1],
-                    conf=max(conf_threshold, 0.40),
-                    verbose=False
+                    conf=max(conf_threshold + 0.20, 0.55),
+                    verbose=False,
+                    imgsz=416
                 )
                 for box in results_custom[0].boxes:
                     coords = box.xyxy[0].tolist()
@@ -668,21 +672,45 @@ def get_video_feed():
                     
                 # Run YOLOv8
                 if model is not None:
-                    target_classes = [0, 63, 67, 73]
-                    results = model.predict(source=frame, classes=target_classes, conf=0.35, verbose=False)
-                    
-                    boxes = results[0].boxes
                     person_detections = []
                     other_detections = []
                     
-                    for box in boxes:
-                        coords = box.xyxy[0].tolist()
-                        conf = float(box.conf[0])
-                        cls = int(box.cls[0])
-                        if cls == 0:
-                            person_detections.append((coords, conf))
-                        else:
-                            other_detections.append((coords, conf, cls))
+                    if custom_model is not None:
+                        # 1. Base model for Person (0) and Laptop (63)
+                        results_base = model.predict(source=frame, classes=[0, 63], conf=0.35, verbose=False, imgsz=320)
+                        for box in results_base[0].boxes:
+                            coords = box.xyxy[0].tolist()
+                            conf = float(box.conf[0])
+                            cls = int(box.cls[0])
+                            if cls == 0:
+                                person_detections.append((coords, conf))
+                            elif cls == 63:
+                                other_detections.append((coords, conf, 63))
+                                
+                        # 2. Custom model for Mobile phone (0) and Book (1)
+                        results_custom = custom_model.predict(source=frame, classes=[0, 1], conf=0.55, verbose=False, imgsz=416)
+                        for box in results_custom[0].boxes:
+                            coords = box.xyxy[0].tolist()
+                            conf = float(box.conf[0])
+                            cls = int(box.cls[0])
+                            if cls == 0:
+                                mapped_cls = 67
+                            elif cls == 1:
+                                mapped_cls = 73
+                            else:
+                                continue
+                            other_detections.append((coords, conf, mapped_cls))
+                    else:
+                        # Fallback to standard base model only
+                        results = model.predict(source=frame, classes=[0, 63, 67, 73], conf=0.35, verbose=False, imgsz=320)
+                        for box in results[0].boxes:
+                            coords = box.xyxy[0].tolist()
+                            conf = float(box.conf[0])
+                            cls = int(box.cls[0])
+                            if cls == 0:
+                                person_detections.append((coords, conf))
+                            else:
+                                other_detections.append((coords, conf, cls))
                     
                     # Merge split person boxes
                     person_detections = merge_person_detections(person_detections)
