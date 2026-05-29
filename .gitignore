@@ -20,3 +20,6 @@ runs/
 # Other temp/test files
 .cph/
 test_s3.jpg
+
+# Backups
+backups/
