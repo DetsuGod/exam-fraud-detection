@@ -4,6 +4,10 @@ import urllib.request
 import csv
 import shutil
 
+# Configure stdout to use UTF-8 for Vietnamese characters on Windows
+if hasattr(sys.stdout, 'reconfigure'):
+    sys.stdout.reconfigure(encoding='utf-8')
+
 # Cau hinh các lop va ID cua Open Images
 # Mobile phone -> /m/050k8
 # Book -> /m/01n5w

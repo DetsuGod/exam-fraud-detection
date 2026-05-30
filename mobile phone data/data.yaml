@@ -1,0 +1,13 @@
+train: ../train/images
+val: ../valid/images
+test: ../test/images
+
+nc: 1
+names: ['Mobile-phone']
+
+roboflow:
+  workspace: chous-workspace-7nu88
+  project: chous-workspace-7nu88
+  version: dataset
+  license: Private
+  url: https://app.roboflow.com/chous-workspace-7nu88/chous-workspace-7nu88/dataset

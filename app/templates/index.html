@@ -793,6 +793,23 @@
                     </select>
                 </div>
 
+                <div class="control-group" id="client-device-group">
+                    <div class="control-label">Thiết Bị Camera (Trình Duyệt)</div>
+                    <select id="client-camera-device">
+                        <option value="">Đang dò tìm thiết bị...</option>
+                    </select>
+                </div>
+
+                <div class="control-group" id="server-idx-group" style="display: none;">
+                    <div class="control-label">Index Camera Máy Chủ</div>
+                    <select id="server-camera-idx">
+                        <option value="0">Camera 0 (Mặc định/Tích hợp)</option>
+                        <option value="1">Camera 1 (Iriun Webcam/USB)</option>
+                        <option value="2">Camera 2</option>
+                        <option value="3">Camera 3</option>
+                    </select>
+                </div>
+
                 <div class="control-group">
                     <div class="control-label">
                         <span>Độ Nhạy (CONF Threshold)</span>
@@ -963,8 +980,51 @@
         const examSessionStatusText = document.getElementById("exam-session-status-text");
         const examStatusDot = document.getElementById("exam-status-dot");
 
+        const clientDeviceGroup = document.getElementById("client-device-group");
+        const clientCameraDevice = document.getElementById("client-camera-device");
+        const serverIdxGroup = document.getElementById("server-idx-group");
+        const serverCameraIdx = document.getElementById("server-camera-idx");
+
         // Set initial time on log
         document.getElementById("init-log-time").innerText = getTimestamp();
+
+        // Enumerate video input devices
+        enumerateCameras();
+
+        // Query browser webcams and populate dropdown
+        async function enumerateCameras() {
+            try {
+                // Request temporary permission to unlock labels
+                const tempStream = await navigator.mediaDevices.getUserMedia({ video: true });
+                tempStream.getTracks().forEach(track => track.stop());
+                
+                const devices = await navigator.mediaDevices.enumerateDevices();
+                const videoDevices = devices.filter(device => device.kind === 'videoinput');
+                
+                const deviceSelect = document.getElementById("client-camera-device");
+                deviceSelect.innerHTML = "";
+                
+                if (videoDevices.length === 0) {
+                    deviceSelect.innerHTML = `<option value="">Không tìm thấy camera</option>`;
+                    return;
+                }
+                
+                videoDevices.forEach(device => {
+                    const option = document.createElement("option");
+                    option.value = device.deviceId;
+                    const name = device.label || `Camera ${deviceSelect.options.length + 1}`;
+                    option.text = name;
+                    if (name.toLowerCase().includes("iriun")) {
+                        option.selected = true; // Auto select Iriun if available
+                    }
+                    deviceSelect.appendChild(option);
+                });
+            } catch (err) {
+                console.error("Lỗi dò tìm camera: ", err);
+                const deviceSelect = document.getElementById("client-camera-device");
+                deviceSelect.innerHTML = `<option value="">Lỗi tải camera: ${err.message}</option>`;
+            }
+        }
 
         // Chart Setup
         const chartCtx = document.getElementById('metricsChart').getContext('2d');
@@ -1003,6 +1063,18 @@
         startBtn.addEventListener("click", toggleProctoring);
         examSessionBtn.addEventListener("click", toggleExamSession);
         cameraSource.addEventListener("change", handleSourceChange);
+        clientCameraDevice.addEventListener("change", () => {
+            if (proctoringActive) {
+                toggleProctoring();
+                setTimeout(toggleProctoring, 500);
+            }
+        });
+        serverCameraIdx.addEventListener("change", () => {
+            if (proctoringActive) {
+                toggleProctoring();
+                setTimeout(toggleProctoring, 500);
+            }
+        });
         confSlider.addEventListener("input", (e) => {
             confVal.innerText = e.target.value;
         });
@@ -1094,6 +1166,14 @@
 
         // Source Switch Handler
         function handleSourceChange() {
+            const source = cameraSource.value;
+            if (source === "client") {
+                clientDeviceGroup.style.display = "block";
+                serverIdxGroup.style.display = "none";
+            } else {
+                clientDeviceGroup.style.display = "none";
+                serverIdxGroup.style.display = "block";
+            }
             if (proctoringActive) {
                 // If actively proctoring, hot-restart stream
                 toggleProctoring();
@@ -1208,7 +1288,7 @@
 
         // Stop all active tracks on client webcam
         function stopClientProctoring() {
-            if (frameInterval) clearInterval(frameInterval);
+            if (frameInterval) clearTimeout(frameInterval);
             if (localStream) {
                 localStream.getTracks().forEach(track => track.stop());
                 localStream = null;
@@ -1235,49 +1315,56 @@
             
             addLog("Hệ thống", "Đang mở kết nối WebSocket...", "system");
             wsConnection = new WebSocket(wsUrl);
+
+            let lastFrameTime = performance.now();
+            const hiddenCanvas = document.createElement("canvas");
+            hiddenCanvas.width = 640;
+            hiddenCanvas.height = 480;
+            const ctx = hiddenCanvas.getContext("2d");
+
+            function sendNextFrame() {
+                if (!proctoringActive || wsConnection.readyState !== WebSocket.OPEN) return;
+                
+                // Draw current webcam frame to hidden canvas
+                ctx.drawImage(cameraFeed, 0, 0, 640, 480);
+                
+                // Convert canvas to jpeg base64
+                const imgBase64 = hiddenCanvas.toDataURL("image/jpeg", 0.65);
+                
+                // Prepare payload and send
+                const payload = {
+                    image: imgBase64,
+                    threshold: confSlider.value,
+                    exam_active: examActive
+                };
+                
+                wsConnection.send(JSON.stringify(payload));
+                lastFrameTime = performance.now();
+            }
             
             wsConnection.onopen = async () => {
                 addLog("Hệ thống", "Kết nối WebSocket thành công. Đang kích hoạt camera...", "system");
                 
                 try {
-                    // Start Webcam
-                    localStream = await navigator.mediaDevices.getUserMedia({
-                        video: { width: 640, height: 480 }
-                    });
+                    // Start Webcam with selected deviceId
+                    const selectedDeviceId = clientCameraDevice.value;
+                    const constraints = {
+                        video: {
+                            width: 640,
+                            height: 480
+                        }
+                    };
+                    if (selectedDeviceId) {
+                        constraints.video.deviceId = { exact: selectedDeviceId };
+                    }
+                    localStream = await navigator.mediaDevices.getUserMedia(constraints);
                     cameraFeed.srcObject = localStream;
                     cameraFeed.style.display = "none"; // Hide raw camera, only show processing canvas overlay
                     
-                    // Start streaming loop
-                    const hiddenCanvas = document.createElement("canvas");
-                    hiddenCanvas.width = 640;
-                    hiddenCanvas.height = 480;
-                    const ctx = hiddenCanvas.getContext("2d");
-                    
                     addLog("Hệ thống", "Đang phân tích luồng video...", "system");
                     
-                    // Live streaming loop
-                    let lastFrameTime = performance.now();
-                    
-                    frameInterval = setInterval(() => {
-                        if (!proctoringActive || wsConnection.readyState !== WebSocket.OPEN) return;
-                        
-                        // Draw current webcam frame to hidden canvas (mirror effect applied during local draw if needed)
-                        // In this case, we draw directly to canvas, and mirrors can be done via CSS if desired.
-                        ctx.drawImage(cameraFeed, 0, 0, 640, 480);
-                        
-                        // Convert canvas to jpeg base64
-                        const imgBase64 = hiddenCanvas.toDataURL("image/jpeg", 0.65);
-                        
-                        // Prepare payload and send
-                        const payload = {
-                            image: imgBase64,
-                            threshold: confSlider.value,
-                            exam_active: examActive
-                        };
-                        
-                        wsConnection.send(JSON.stringify(payload));
-                        lastFrameTime = performance.now();
-                    }, 120); // ~8 FPS reduces local CPU load while maintaining fast reactions
+                    // Start streaming loop by sending the first frame
+                    sendNextFrame();
                     
                 } catch (err) {
                     console.error("Camera activation error: ", err);
@@ -1301,6 +1388,11 @@
                 
                 // Update stats and violations
                 updateProctoringMetrics(metrics);
+
+                // Schedule next frame with a 5ms delay to keep CPU usage low on client while staying real-time
+                if (proctoringActive) {
+                    frameInterval = setTimeout(sendNextFrame, 5);
+                }
             };
             
             wsConnection.onerror = (e) => {
@@ -1322,8 +1414,9 @@
             canvasOverlay.style.display = "none";
             serverStreamFeed.style.display = "block";
             
-            // Set MJPEG source
-            serverStreamFeed.src = "/video_feed";
+            // Set MJPEG source with camera index
+            const camIdx = serverCameraIdx.value || 0;
+            serverStreamFeed.src = `/video_feed?camera_idx=${camIdx}`;
             
             statusBadge.innerText = "MONITOR ACTIVE";
             statusBadge.className = "status-badge status-safe";

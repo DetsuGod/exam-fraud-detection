@@ -181,6 +181,99 @@ class CandidateTracker:
 
         return self.bboxes
 
+class ViolationTracker:
+    def __init__(self, max_disappeared=15, iou_threshold=0.15):
+        self.next_id = 1
+        self.objects = {}       # id (int) -> { "bbox": [x1, y1, x2, y2], "conf": float, "cls": int, "disappeared": int }
+        self.max_disappeared = max_disappeared
+        self.iou_threshold = iou_threshold
+
+    def compute_iou(self, boxA, boxB):
+        xA = max(boxA[0], boxB[0])
+        yA = max(boxA[1], boxB[1])
+        xB = min(boxA[2], boxB[2])
+        yB = min(boxA[3], boxB[3])
+        interArea = max(0, xB - xA) * max(0, yB - yA)
+        boxAArea = (boxA[2] - boxA[0]) * (boxA[3] - boxA[1])
+        boxBArea = (boxB[2] - boxB[0]) * (boxB[3] - boxB[1])
+        return interArea / float(boxAArea + boxBArea - interArea + 1e-6)
+
+    def update(self, rects_with_confs_and_classes):
+        # rects_with_confs_and_classes is a list of ([x1, y1, x2, y2], conf, cls)
+        if len(rects_with_confs_and_classes) == 0:
+            for obj_id in list(self.objects.keys()):
+                self.objects[obj_id]["disappeared"] += 1
+                if self.objects[obj_id]["disappeared"] > self.max_disappeared:
+                    del self.objects[obj_id]
+            return self.get_tracked_objects()
+
+        matched_detections = set()
+        matched_objects = set()
+
+        # Match greedily by IoU
+        for obj_id, obj in self.objects.items():
+            best_iou = 0
+            best_idx = -1
+            for idx, (bbox, conf, cls) in enumerate(rects_with_confs_and_classes):
+                if idx in matched_detections:
+                    continue
+                if cls != obj["cls"]:
+                    continue
+                iou = self.compute_iou(obj["bbox"], bbox)
+                if iou > best_iou:
+                    best_iou = iou
+                    best_idx = idx
+            
+            if best_iou > self.iou_threshold:
+                bbox, conf, cls = rects_with_confs_and_classes[best_idx]
+                
+                # Apply smoothing
+                alpha = 0.5
+                prev_bbox = obj["bbox"]
+                smoothed_bbox = [
+                    alpha * bbox[0] + (1 - alpha) * prev_bbox[0],
+                    alpha * bbox[1] + (1 - alpha) * prev_bbox[1],
+                    alpha * bbox[2] + (1 - alpha) * prev_bbox[2],
+                    alpha * bbox[3] + (1 - alpha) * prev_bbox[3]
+                ]
+                
+                self.objects[obj_id]["bbox"] = smoothed_bbox
+                self.objects[obj_id]["conf"] = max(self.objects[obj_id]["conf"] * 0.3 + conf * 0.7, conf)
+                self.objects[obj_id]["disappeared"] = 0
+                matched_detections.add(best_idx)
+                matched_objects.add(obj_id)
+
+        # Increment disappeared for unmatched existing objects
+        for obj_id in list(self.objects.keys()):
+            if obj_id not in matched_objects:
+                self.objects[obj_id]["disappeared"] += 1
+                if self.objects[obj_id]["disappeared"] > self.max_disappeared:
+                    del self.objects[obj_id]
+
+        # Register new objects for unmatched detections
+        for idx, (bbox, conf, cls) in enumerate(rects_with_confs_and_classes):
+            if idx not in matched_detections:
+                self.objects[self.next_id] = {
+                    "bbox": bbox,
+                    "conf": conf,
+                    "cls": cls,
+                    "disappeared": 0
+                }
+                self.next_id += 1
+
+        return self.get_tracked_objects()
+
+    def get_tracked_objects(self):
+        return [
+            {
+                "coords": obj["bbox"],
+                "conf": obj["conf"],
+                "cls": obj["cls"],
+                "id": obj_id
+            }
+            for obj_id, obj in self.objects.items()
+        ]
+
 def merge_person_detections(person_detections, iou_threshold=0.15, containment_threshold=0.5, proximity_ratio=0.2):
     """
     Greedily merges fragmented/split person bounding boxes that belong to the same person
@@ -290,6 +383,46 @@ def merge_person_detections(person_detections, iou_threshold=0.15, containment_t
         
     return current_dets
 
+def apply_violation_nms(violations, iou_threshold=0.35, containment_threshold=0.55):
+    """
+    Applies Non-Maximum Suppression (NMS) to violation detections of the same class.
+    violations: list of tuples (coords, conf, cls)
+    """
+    if len(violations) < 2:
+        return violations
+
+    # Sort violations by confidence descending
+    violations = sorted(violations, key=lambda x: x[1], reverse=True)
+    keep = []
+
+    def compute_iou(boxA, boxB):
+        xA = max(boxA[0], boxB[0])
+        yA = max(boxA[1], boxB[1])
+        xB = min(boxA[2], boxB[2])
+        yB = min(boxA[3], boxB[3])
+        interArea = max(0, xB - xA) * max(0, yB - yA)
+        boxAArea = (boxA[2] - boxA[0]) * (boxA[3] - boxA[1])
+        boxBArea = (boxB[2] - boxB[0]) * (boxB[3] - boxB[1])
+        iou = interArea / float(boxAArea + boxBArea - interArea + 1e-6)
+        containmentA = interArea / float(boxAArea + 1e-6)
+        containmentB = interArea / float(boxBArea + 1e-6)
+        return iou, max(containmentA, containmentB)
+
+    while len(violations) > 0:
+        curr = violations.pop(0)
+        keep.append(curr)
+        
+        remaining = []
+        for item in violations:
+            if item[2] == curr[2]:  # same class
+                iou, max_contain = compute_iou(curr[0], item[0])
+                if iou > iou_threshold or max_contain > containment_threshold:
+                    continue
+            remaining.append(item)
+        violations = remaining
+
+    return keep
+
 # Global YOLO model variables
 model = None
 custom_model = None
@@ -363,6 +496,7 @@ async def websocket_stream(websocket: WebSocket):
     print("[WEBSOCKET] Client connected for streaming.")
     
     tracker = CandidateTracker(max_disappeared=20, distance_threshold=200)
+    violation_tracker = ViolationTracker(max_disappeared=15)
     session_active = False
     initial_candidates = {}
     
@@ -393,17 +527,17 @@ async def websocket_stream(websocket: WebSocket):
             
             # Run YOLOv8 detection
             person_detections = []
-            other_boxes = []
+            raw_violations = []
             
             if custom_model is not None:
                 # 1. Base model for Person (0) and Laptop (63)
-                # Optimize CPU latency by resizing base model input to imgsz=320
+                # Optimize CPU latency by resizing base model input to imgsz=480
                 results_base = model.predict(
                     source=frame,
                     classes=[0, 63],
                     conf=conf_threshold,
                     verbose=False,
-                    imgsz=320
+                    imgsz=480
                 )
                 for box in results_base[0].boxes:
                     coords = box.xyxy[0].tolist()
@@ -412,21 +546,18 @@ async def websocket_stream(websocket: WebSocket):
                     if cls == 0:
                         person_detections.append((coords, conf))
                     elif cls == 63:
-                        other_boxes.append({
-                            "coords": coords,
-                            "conf": conf,
-                            "cls": 63
-                        })
+                        raw_violations.append((coords, conf, 63))
                 
                 # 2. Custom model for Mobile phone (0) and Book (1)
-                # Run custom model with imgsz=416 (matching training size) for 3x speedup.
-                # Use a high confidence threshold (min 0.55) to strictly eliminate false positives (detecting person/face as phone).
+                # Run custom model with imgsz=512 (matching the native optimized training size)
+                # Since we added empty classroom and chair backgrounds, the model is already robust against false positives,
+                # so we can use the user-defined conf_threshold directly for maximum sensitivity.
                 results_custom = custom_model.predict(
                     source=frame,
                     classes=[0, 1],
-                    conf=max(conf_threshold + 0.20, 0.55),
+                    conf=conf_threshold,
                     verbose=False,
-                    imgsz=416
+                    imgsz=512
                 )
                 for box in results_custom[0].boxes:
                     coords = box.xyxy[0].tolist()
@@ -459,18 +590,14 @@ async def websocket_stream(websocket: WebSocket):
                         iou = interArea / float(p_area + c_area - interArea + 1e-6)
                         area_ratio = c_area / float(p_area + 1e-6)
                         
-                        if iou > 0.30 or area_ratio > 0.30:
+                        if iou > 0.80 or area_ratio > 0.80:
                             is_false_positive = True
                             break
                             
                     if is_false_positive:
                         continue
                     
-                    other_boxes.append({
-                        "coords": coords,
-                        "conf": conf,
-                        "cls": mapped_cls
-                    })
+                    raw_violations.append((coords, conf, mapped_cls))
             else:
                 # Fallback to standard base model only
                 target_classes = [0, 63, 67, 73]
@@ -478,7 +605,8 @@ async def websocket_stream(websocket: WebSocket):
                     source=frame,
                     classes=target_classes,
                     conf=conf_threshold,
-                    verbose=False
+                    verbose=False,
+                    imgsz=512
                 )
                 for box in results[0].boxes:
                     coords = box.xyxy[0].tolist()
@@ -487,17 +615,19 @@ async def websocket_stream(websocket: WebSocket):
                     if cls == 0:
                         person_detections.append((coords, conf))
                     else:
-                        other_boxes.append({
-                            "coords": coords,
-                            "conf": conf,
-                            "cls": cls
-                        })
+                        raw_violations.append((coords, conf, cls))
             
             # Merge fragmented/split person detections before tracking
             person_detections = merge_person_detections(person_detections)
             
             # Update candidate tracker with person detections
             tracked_candidates = tracker.update(person_detections)
+            
+            # Apply Non-Maximum Suppression (NMS) to eliminate duplicate boxes (e.g. 1 phone showing 2 boxes)
+            raw_violations = apply_violation_nms(raw_violations)
+            
+            # Update violation tracker with raw violations to smooth and persist boxes
+            other_boxes = violation_tracker.update(raw_violations)
             
             # Handle exam session transitions
             if exam_active and not session_active:
@@ -662,7 +792,7 @@ async def websocket_stream(websocket: WebSocket):
             pass
 
 @app.get("/video_feed")
-def get_video_feed():
+def get_video_feed(camera_idx: int = 0):
     """
     Fallback MJPEG streaming using local webcam connected to server.
     Useful for local machine testing.
@@ -672,18 +802,20 @@ def get_video_feed():
         # Try DirectShow first on Windows to avoid backend delays or failure
         import platform
         if platform.system() == "Windows":
-            camera = cv2.VideoCapture(0, cv2.CAP_DSHOW)
+            camera = cv2.VideoCapture(camera_idx, cv2.CAP_DSHOW)
         else:
-            camera = cv2.VideoCapture(0)
+            camera = cv2.VideoCapture(camera_idx)
             
         if not camera.isOpened():
             # Fallback to default backend if CAP_DSHOW fails
-            camera = cv2.VideoCapture(0)
+            camera = cv2.VideoCapture(camera_idx)
             
         if not camera.isOpened():
-            print("[CAMERA ERROR] Local camera could not be opened.")
+            print(f"[CAMERA ERROR] Local camera index {camera_idx} could not be opened.")
             return
             
+        violation_tracker = ViolationTracker(max_disappeared=15)
+        
         try:
             while True:
                 success, frame = camera.read()
@@ -693,11 +825,11 @@ def get_video_feed():
                 # Run YOLOv8
                 if model is not None:
                     person_detections = []
-                    other_detections = []
+                    raw_violations = []
                     
                     if custom_model is not None:
                         # 1. Base model for Person (0) and Laptop (63)
-                        results_base = model.predict(source=frame, classes=[0, 63], conf=0.35, verbose=False, imgsz=320)
+                        results_base = model.predict(source=frame, classes=[0, 63], conf=0.35, verbose=False, imgsz=480)
                         for box in results_base[0].boxes:
                             coords = box.xyxy[0].tolist()
                             conf = float(box.conf[0])
@@ -705,10 +837,10 @@ def get_video_feed():
                             if cls == 0:
                                 person_detections.append((coords, conf))
                             elif cls == 63:
-                                other_detections.append((coords, conf, 63))
+                                raw_violations.append((coords, conf, 63))
                                 
                         # 2. Custom model for Mobile phone (0) and Book (1)
-                        results_custom = custom_model.predict(source=frame, classes=[0, 1], conf=0.55, verbose=False, imgsz=416)
+                        results_custom = custom_model.predict(source=frame, classes=[0, 1], conf=0.35, verbose=False, imgsz=512)
                         for box in results_custom[0].boxes:
                             coords = box.xyxy[0].tolist()
                             conf = float(box.conf[0])
@@ -735,17 +867,17 @@ def get_video_feed():
                                 iou = interArea / float(p_area + c_area - interArea + 1e-6)
                                 area_ratio = c_area / float(p_area + 1e-6)
                                 
-                                if iou > 0.30 or area_ratio > 0.30:
+                                if iou > 0.80 or area_ratio > 0.80:
                                     is_false_positive = True
                                     break
                                     
                             if is_false_positive:
                                 continue
                                 
-                            other_detections.append((coords, conf, mapped_cls))
+                            raw_violations.append((coords, conf, mapped_cls))
                     else:
                         # Fallback to standard base model only
-                        results = model.predict(source=frame, classes=[0, 63, 67, 73], conf=0.35, verbose=False, imgsz=320)
+                        results = model.predict(source=frame, classes=[0, 63, 67, 73], conf=0.35, verbose=False, imgsz=512)
                         for box in results[0].boxes:
                             coords = box.xyxy[0].tolist()
                             conf = float(box.conf[0])
@@ -753,7 +885,7 @@ def get_video_feed():
                             if cls == 0:
                                 person_detections.append((coords, conf))
                             else:
-                                other_detections.append((coords, conf, cls))
+                                raw_violations.append((coords, conf, cls))
                     
                     # Merge split person boxes
                     person_detections = merge_person_detections(person_detections)
@@ -764,8 +896,17 @@ def get_video_feed():
                         cv2.rectangle(frame, (x1, y1), (x2, y2), (255, 120, 0), 2)
                         cv2.putText(frame, f"Candidate: {conf:.2f}", (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 120, 0), 1)
                         
+                    # Apply Non-Maximum Suppression (NMS) to eliminate duplicate boxes (e.g. 1 phone showing 2 boxes)
+                    raw_violations = apply_violation_nms(raw_violations)
+
+                    # Update violation tracker with raw violations to smooth and persist boxes
+                    tracked_violations = violation_tracker.update(raw_violations)
+
                     # Draw non-person detections
-                    for coords, conf, cls in other_detections:
+                    for item in tracked_violations:
+                        coords = item["coords"]
+                        conf = item["conf"]
+                        cls = item["cls"]
                         x1, y1, x2, y2 = map(int, coords)
                         if cls == 67:
                             color = (68, 68, 239)
