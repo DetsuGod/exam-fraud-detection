@@ -229,7 +229,7 @@ pip install ultralytics fastapi uvicorn opencv-python websockets numpy
 
 # 👨‍💻 Tác Giả
 
-Developed by **DetsuGod**
+Developed by **Huỳnh Châu Kiệt**
 
 ---
 
