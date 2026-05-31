@@ -1,5 +1,6 @@
 import os
 import cv2
+import time
 import json
 import base64
 import math
@@ -51,13 +52,49 @@ class CandidateTracker:
         return interArea / float(boxAArea + boxBArea - interArea + 1e-6)
 
     def register(self, centroid, bbox, conf):
-        label = f"id{self.next_id:02d}"
+        i = 1
+        while f"id{i:02d}" in self.candidates:
+            i += 1
+        label = f"id{i:02d}"
         self.candidates[label] = centroid
         self.bboxes[label] = bbox
         self.confs[label] = conf
         self.disappeared[label] = 0
-        self.next_id += 1
         return label
+
+    def defragment(self):
+        """
+        Re-indexes the active candidates sequentially from 1 to N, sorted by their
+        leftmost coordinate (x1) for a clean, professional proctoring layout.
+        """
+        if len(self.candidates) == 0:
+            return
+
+        # Get all current candidate labels
+        labels = list(self.candidates.keys())
+        
+        # Sort labels by the x1 coordinate of their bounding box
+        sorted_labels = sorted(labels, key=lambda l: self.bboxes[l][0])
+        
+        # Create temporary copies of dicts
+        old_candidates = dict(self.candidates)
+        old_bboxes = dict(self.bboxes)
+        old_confs = dict(self.confs)
+        old_disappeared = dict(self.disappeared)
+        
+        # Clear original dicts
+        self.candidates.clear()
+        self.bboxes.clear()
+        self.confs.clear()
+        self.disappeared.clear()
+        
+        # Re-register with sequential IDs 1 to N
+        for idx, old_lbl in enumerate(sorted_labels):
+            new_lbl = f"id{idx + 1:02d}"
+            self.candidates[new_lbl] = old_candidates[old_lbl]
+            self.bboxes[new_lbl] = old_bboxes[old_lbl]
+            self.confs[new_lbl] = old_confs[old_lbl]
+            self.disappeared[new_lbl] = old_disappeared[old_lbl]
 
     def deregister(self, label):
         if label in self.candidates:
@@ -182,11 +219,13 @@ class CandidateTracker:
         return self.bboxes
 
 class ViolationTracker:
-    def __init__(self, max_disappeared=15, iou_threshold=0.15):
+    def __init__(self, max_disappeared=25, min_hits=5, iou_threshold=0.10, distance_threshold=350):
         self.next_id = 1
-        self.objects = {}       # id (int) -> { "bbox": [x1, y1, x2, y2], "conf": float, "cls": int, "disappeared": int }
+        self.objects = {}       # id (int) -> { "bbox": [x1, y1, x2, y2], "conf": float, "cls": int, "disappeared": int, "hits": int }
         self.max_disappeared = max_disappeared
+        self.min_hits = min_hits
         self.iou_threshold = iou_threshold
+        self.distance_threshold = distance_threshold
 
     def compute_iou(self, boxA, boxB):
         xA = max(boxA[0], boxB[0])
@@ -199,7 +238,7 @@ class ViolationTracker:
         return interArea / float(boxAArea + boxBArea - interArea + 1e-6)
 
     def update(self, rects_with_confs_and_classes):
-        # rects_with_confs_and_classes is a list of ([x1, y1, x2, y2], conf, cls)
+        # rects_with_confs_and_classes: list of ([x1, y1, x2, y2], conf, cls)
         if len(rects_with_confs_and_classes) == 0:
             for obj_id in list(self.objects.keys()):
                 self.objects[obj_id]["disappeared"] += 1
@@ -207,10 +246,25 @@ class ViolationTracker:
                     del self.objects[obj_id]
             return self.get_tracked_objects()
 
+        # Compute centroids for new detections
+        input_centroids = []
+        for (bbox, conf, cls) in rects_with_confs_and_classes:
+            cX = int((bbox[0] + bbox[2]) / 2.0)
+            cY = int((bbox[1] + bbox[3]) / 2.0)
+            input_centroids.append((cX, cY))
+
+        # Generate centroids for existing objects
+        existing_centroids = {}
+        for obj_id, obj in self.objects.items():
+            bbox = obj["bbox"]
+            cX = int((bbox[0] + bbox[2]) / 2.0)
+            cY = int((bbox[1] + bbox[3]) / 2.0)
+            existing_centroids[obj_id] = (cX, cY)
+
         matched_detections = set()
         matched_objects = set()
 
-        # Match greedily by IoU
+        # 1. Match greedily by IoU first
         for obj_id, obj in self.objects.items():
             best_iou = 0
             best_idx = -1
@@ -225,21 +279,33 @@ class ViolationTracker:
                     best_idx = idx
             
             if best_iou > self.iou_threshold:
-                bbox, conf, cls = rects_with_confs_and_classes[best_idx]
-                
-                # Apply smoothing
-                alpha = 0.5
-                prev_bbox = obj["bbox"]
-                smoothed_bbox = [
-                    alpha * bbox[0] + (1 - alpha) * prev_bbox[0],
-                    alpha * bbox[1] + (1 - alpha) * prev_bbox[1],
-                    alpha * bbox[2] + (1 - alpha) * prev_bbox[2],
-                    alpha * bbox[3] + (1 - alpha) * prev_bbox[3]
-                ]
-                
-                self.objects[obj_id]["bbox"] = smoothed_bbox
-                self.objects[obj_id]["conf"] = max(self.objects[obj_id]["conf"] * 0.3 + conf * 0.7, conf)
-                self.objects[obj_id]["disappeared"] = 0
+                self.update_object(obj_id, rects_with_confs_and_classes[best_idx])
+                matched_detections.add(best_idx)
+                matched_objects.add(obj_id)
+
+        # 2. For unmatched objects, try matching by Centroid Distance
+        for obj_id, obj in self.objects.items():
+            if obj_id in matched_objects:
+                continue
+            
+            best_dist = float("inf")
+            best_idx = -1
+            c_old = existing_centroids[obj_id]
+            
+            for idx, (bbox, conf, cls) in enumerate(rects_with_confs_and_classes):
+                if idx in matched_detections:
+                    continue
+                if cls != obj["cls"]:
+                    continue
+                c_new = input_centroids[idx]
+                dist = math.sqrt((c_old[0] - c_new[0])**2 + (c_old[1] - c_new[1])**2)
+                if dist < best_dist:
+                    best_dist = dist
+                    best_idx = idx
+            
+            # Match if centroid distance is within pixel radius (increased threshold to handle fast movements)
+            if best_dist < self.distance_threshold:
+                self.update_object(obj_id, rects_with_confs_and_classes[best_idx])
                 matched_detections.add(best_idx)
                 matched_objects.add(obj_id)
 
@@ -257,13 +323,40 @@ class ViolationTracker:
                     "bbox": bbox,
                     "conf": conf,
                     "cls": cls,
-                    "disappeared": 0
+                    "disappeared": 0,
+                    "hits": 1
                 }
                 self.next_id += 1
 
         return self.get_tracked_objects()
 
-    def get_tracked_objects(self):
+    def update_object(self, obj_id, detection):
+        bbox, conf, cls = detection
+        prev_bbox = self.objects[obj_id]["bbox"]
+        
+        # Calculate centroid distance between previous box and new detection
+        c_old = (int((prev_bbox[0] + prev_bbox[2]) / 2.0), int((prev_bbox[1] + prev_bbox[3]) / 2.0))
+        c_new = (int((bbox[0] + bbox[2]) / 2.0), int((bbox[1] + bbox[3]) / 2.0))
+        dist = math.sqrt((c_old[0] - c_new[0])**2 + (c_old[1] - c_new[1])**2)
+        
+        # Adaptive smoothing factor: instant snap on rapid movement (>80px), smooth on stationary jitter
+        if dist > 80:
+            alpha = 1.0
+        else:
+            alpha = 0.8
+            
+        smoothed_bbox = [
+            alpha * bbox[0] + (1 - alpha) * prev_bbox[0],
+            alpha * bbox[1] + (1 - alpha) * prev_bbox[1],
+            alpha * bbox[2] + (1 - alpha) * prev_bbox[2],
+            alpha * bbox[3] + (1 - alpha) * prev_bbox[3]
+        ]
+        self.objects[obj_id]["bbox"] = smoothed_bbox
+        self.objects[obj_id]["conf"] = max(self.objects[obj_id]["conf"] * 0.2 + conf * 0.8, conf)
+        self.objects[obj_id]["disappeared"] = 0
+        self.objects[obj_id]["hits"] += 1
+
+    def get_tracked_objects(self, active_only=True):
         return [
             {
                 "coords": obj["bbox"],
@@ -272,6 +365,7 @@ class ViolationTracker:
                 "id": obj_id
             }
             for obj_id, obj in self.objects.items()
+            if (not active_only or obj["disappeared"] <= 8) and obj["hits"] >= self.min_hits
         ]
 
 def merge_person_detections(person_detections, iou_threshold=0.15, containment_threshold=0.5, proximity_ratio=0.2):
@@ -423,14 +517,73 @@ def apply_violation_nms(violations, iou_threshold=0.35, containment_threshold=0.
 
     return keep
 
-# Global YOLO model variables
+def resolve_cross_class_overlaps(violations, iou_threshold=0.55, containment_threshold=0.80):
+    """
+    Resolves overlapping boxes between different violation classes (e.g. Phone vs Laptop).
+    If a phone and a laptop box have a high IoU (e.g. > 0.55), they are likely a duplicate detection 
+    of the same object. We keep the one with the higher confidence score.
+    Also, if a laptop is completely contained within a phone box, it is a false detection of the phone.
+    """
+    if len(violations) < 2:
+        return violations
+
+    # Sort violations to prioritize class 2 (casio) over class 67/63/73
+    # We can do this by adding 10.0 to the sorting key of class 2 so it is evaluated first
+    violations = sorted(violations, key=lambda x: x[1] + 10.0 if x[2] == 2 else x[1], reverse=True)
+    keep = []
+
+    def compute_iou_and_containment(boxA, boxB):
+        xA = max(boxA[0], boxB[0])
+        yA = max(boxA[1], boxB[1])
+        xB = min(boxA[2], boxB[2])
+        yB = min(boxA[3], boxB[3])
+        interArea = max(0, xB - xA) * max(0, yB - yA)
+        boxAArea = (boxA[2] - boxA[0]) * (boxA[3] - boxA[1])
+        boxBArea = (boxB[2] - boxB[0]) * (boxB[3] - boxB[1])
+        iou = interArea / float(boxAArea + boxBArea - interArea + 1e-6)
+        containmentA = interArea / float(boxAArea + 1e-6)
+        containmentB = interArea / float(boxBArea + 1e-6)
+        return iou, containmentA, containmentB
+
+    while len(violations) > 0:
+        curr = violations.pop(0)
+        curr_box, curr_conf, curr_cls = curr
+        should_suppress = False
+
+        for kept_box, kept_conf, kept_cls in keep:
+            if curr_cls != kept_cls:
+                iou, cont_curr, cont_kept = compute_iou_and_containment(curr_box, kept_box)
+
+                # 1. High IoU overlap between different classes -> keep the one with higher confidence
+                if iou > iou_threshold:
+                    should_suppress = True
+                    break
+
+                # 2. Geometric containment anomaly: laptop (63) inside a phone (67) box is impossible,
+                # so if the laptop is inside the phone box, suppress the phone box.
+                if curr_cls == 67 and kept_cls == 63 and cont_kept > containment_threshold:
+                    should_suppress = True
+                    break
+                if curr_cls == 63 and kept_cls == 67 and cont_curr > containment_threshold:
+                    should_suppress = True
+                    break
+
+        if not should_suppress:
+            keep.append(curr)
+
+    return keep
+
+# Global YOLO model and Haar Cascade variables
 model = None
 custom_model = None
+face_cascade = None
+eye_cascade = None
+profile_cascade = None
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup
-    global model, custom_model
+    global model, custom_model, face_cascade, eye_cascade, profile_cascade
     
     # 1. Load base model (yolov8n.pt) - Normal, lightweight CPU model
     print("[STARTUP] Loading normal base model (yolov8n.pt)...")
@@ -445,6 +598,57 @@ async def lifespan(app: FastAPI):
     else:
         print("[STARTUP] Custom trained model ('best.pt') not found. Using base model only.")
         custom_model = None
+        
+    # 3. Load Haar Cascade files from a safe ASCII directory (to prevent OpenCV Unicode path bug on Windows)
+    try:
+        import tempfile
+        import shutil
+        
+        src_dir = cv2.data.haarcascades
+        temp_dir = os.path.join(tempfile.gettempdir(), "ai_exam_proctoring_cascades")
+        os.makedirs(temp_dir, exist_ok=True)
+        
+        files_to_copy = [
+            "haarcascade_frontalface_default.xml",
+            "haarcascade_eye.xml",
+            "haarcascade_profileface.xml"
+        ]
+        
+        loaded_paths = {}
+        for filename in files_to_copy:
+            src_path = os.path.join(src_dir, filename)
+            dest_path = os.path.join(temp_dir, filename)
+            
+            # Copy file using Python's built-in file support (handles unicode perfectly)
+            if os.path.exists(src_path):
+                shutil.copy2(src_path, dest_path)
+                loaded_paths[filename] = dest_path
+            else:
+                # If not found in cv2.data.haarcascades, fall back to dest_path if it already exists
+                loaded_paths[filename] = dest_path if os.path.exists(dest_path) else src_path
+                
+        face_cascade = cv2.CascadeClassifier(loaded_paths.get("haarcascade_frontalface_default.xml"))
+        eye_cascade = cv2.CascadeClassifier(loaded_paths.get("haarcascade_eye.xml"))
+        profile_cascade = cv2.CascadeClassifier(loaded_paths.get("haarcascade_profileface.xml"))
+        
+        if face_cascade.empty() or eye_cascade.empty() or profile_cascade.empty():
+            print("[STARTUP WARNING] One or more Haar Cascades failed to load (empty). Falling back to direct load...")
+            # Fallback to direct load
+            face_cascade = cv2.CascadeClassifier(os.path.join(cv2.data.haarcascades, "haarcascade_frontalface_default.xml"))
+            eye_cascade = cv2.CascadeClassifier(os.path.join(cv2.data.haarcascades, "haarcascade_eye.xml"))
+            profile_cascade = cv2.CascadeClassifier(os.path.join(cv2.data.haarcascades, "haarcascade_profileface.xml"))
+        else:
+            print("[STARTUP] Haar Cascades loaded successfully from safe temp path.")
+    except Exception as e:
+        print(f"[STARTUP ERROR] Failed to copy/load Haar Cascades safely: {e}")
+        # Final fallback
+        try:
+            face_cascade = cv2.CascadeClassifier(os.path.join(cv2.data.haarcascades, "haarcascade_frontalface_default.xml"))
+            eye_cascade = cv2.CascadeClassifier(os.path.join(cv2.data.haarcascades, "haarcascade_eye.xml"))
+            profile_cascade = cv2.CascadeClassifier(os.path.join(cv2.data.haarcascades, "haarcascade_profileface.xml"))
+            print("[STARTUP] Haar Cascades loaded via fallback direct path.")
+        except Exception as fallback_err:
+            print(f"[STARTUP CRITICAL] Haar Cascade direct fallback failed: {fallback_err}")
         
     print("[STARTUP] Models loaded successfully.")
     yield
@@ -468,22 +672,175 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Mount static assets for the React Exam Screen
+EXAM_ASSETS_DIR = "D:/tài liệu/ie101/model/UI and module/Exam screen/dist/assets"
+if os.path.exists(EXAM_ASSETS_DIR):
+    app.mount("/assets", StaticFiles(directory=EXAM_ASSETS_DIR), name="exam_assets")
+    print(f"[INIT] Mounted React Exam Screen assets from: {EXAM_ASSETS_DIR}")
+else:
+    print(f"[WARN] React Exam Screen assets directory not found: {EXAM_ASSETS_DIR}")
+
 @app.get("/", response_class=HTMLResponse)
 async def get_dashboard(request: Request):
     """
-    Renders the proctoring dashboard.
+    Renders the multi-candidate admin proctoring dashboard.
     """
     try:
-        print("[ROUTE] Accessing dashboard...")
-        template = templates.get_template("index.html")
+        print("[ROUTE] Accessing Admin Dashboard...")
+        template = templates.get_template("dashboard.html")
         content = template.render(request=request)
-        print("[ROUTE] Template rendered successfully")
+        print("[ROUTE] Admin Dashboard rendered successfully")
         return content
     except Exception as e:
-        print(f"[ROUTE ERROR] Error rendering template: {type(e).__name__}: {e}")
+        print(f"[ROUTE ERROR] Error rendering admin template: {type(e).__name__}: {e}")
         import traceback
         traceback.print_exc()
         raise
+
+@app.get("/dashboard", response_class=HTMLResponse)
+async def get_admin_dashboard(request: Request):
+    """
+    Alternative route for multi-candidate admin proctoring dashboard.
+    """
+    return await get_dashboard(request)
+
+@app.get("/exam", response_class=HTMLResponse)
+async def get_exam_dashboard(request: Request):
+    """
+    Serves the newly integrated React Exam Screen application.
+    """
+    try:
+        print("[ROUTE] Accessing Exam Page...")
+        exam_html_path = "D:/tài liệu/ie101/model/UI and module/Exam screen/dist/index.html"
+        if os.path.exists(exam_html_path):
+            with open(exam_html_path, "r", encoding="utf-8") as f:
+                content = f.read()
+            print("[ROUTE] Exam HTML rendered successfully from React build")
+            return HTMLResponse(content=content)
+        else:
+            return HTMLResponse(content="<h1>Error: Exam page build not found. Please run 'npm run build' inside 'UI and module/Exam screen'.</h1>", status_code=404)
+    except Exception as e:
+        print(f"[ROUTE ERROR] Error rendering exam page: {type(e).__name__}: {e}")
+        return HTMLResponse(content=f"<h1>Internal Server Error: {e}</h1>", status_code=500)
+
+from fastapi.responses import FileResponse
+
+@app.get("/favicon.svg", include_in_schema=False)
+async def get_favicon():
+    favicon_path = "D:/tài liệu/ie101/model/UI and module/Exam screen/dist/favicon.svg"
+    if os.path.exists(favicon_path):
+        return FileResponse(favicon_path)
+    return HTMLResponse(status_code=404)
+
+@app.get("/icons.svg", include_in_schema=False)
+async def get_icons():
+    icons_path = "D:/tài liệu/ie101/model/UI and module/Exam screen/dist/icons.svg"
+    if os.path.exists(icons_path):
+        return FileResponse(icons_path)
+    return HTMLResponse(status_code=404)
+
+# React Exam Screen state storage
+exam_student_connections = {}
+exam_admin_connections = set()
+student_screens = {}
+current_session_dir = None
+pending_exam_violations = {}
+
+
+@app.websocket("/ws/exam")
+async def websocket_exam(websocket: WebSocket):
+    global current_session_dir, pending_exam_violations
+    role = websocket.query_params.get("role", "student")
+    await websocket.accept()
+    
+    if role == "admin":
+        exam_admin_connections.add(websocket)
+        print("[WS EXAM] Admin connected")
+    else:
+        print("[WS EXAM] Student connected")
+        
+    student_id = None
+    try:
+        while True:
+            message = await websocket.receive_text()
+            data = json.loads(message)
+            
+            # Keep track of which student is connected
+            if "student_id" in data and data["student_id"]:
+                student_id = data["student_id"].lower()
+                exam_student_connections[student_id] = websocket
+                
+            event_type = data.get("event_type")
+            image = data.get("image")
+            
+            # If student is sharing their screen, save the screenshot frame
+            if image and student_id:
+                student_screens[student_id] = image
+                
+            # Log and handle exam violations
+            if event_type in ["BLUR", "VISIBILITY_CHANGE", "COPY_DETECTED", "SCREEN_SHARE_STOPPED"]:
+                msg = ""
+                if event_type == "BLUR":
+                    msg = "Thí sinh chuyển tab hoặc rời khỏi trang làm bài!"
+                elif event_type == "VISIBILITY_CHANGE":
+                    msg = "Thí sinh ẩn màn hình bài thi!"
+                elif event_type == "COPY_DETECTED":
+                    msg = "Thí sinh sao chép nội dung bài thi!"
+                elif event_type == "SCREEN_SHARE_STOPPED":
+                    msg = "CẢNH BÁO: Thí sinh dừng chia sẻ màn hình làm bài!"
+                
+                if student_id and msg:
+                    sid = student_id.lower()
+                    if sid not in pending_exam_violations:
+                        pending_exam_violations[sid] = []
+                    pending_exam_violations[sid].append({
+                        "event_type": event_type,
+                        "message": msg
+                    })
+                    
+                    other_sid = sid[2:] if sid.startswith("id") else f"id{sid}"
+                    if other_sid not in pending_exam_violations:
+                        pending_exam_violations[other_sid] = []
+                    pending_exam_violations[other_sid].append({
+                        "event_type": event_type,
+                        "message": msg
+                    })
+                    print(f"[WS EXAM VIOLATION] Queued exam violation for {student_id}: {msg}")
+                    
+                    # Save screenshot of exam violation to current_session_dir/Exam
+                    if current_session_dir is not None and image:
+                        try:
+                            import datetime
+                            now_str = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+                            filename = f"{student_id}_{event_type}_{now_str}.jpg"
+                            exam_save_path = os.path.join(current_session_dir, "Exam", filename)
+                            
+                            if "," in image:
+                                _, encoded = image.split(",", 1)
+                            else:
+                                encoded = image
+                            
+                            img_bytes = base64.b64decode(encoded)
+                            with open(exam_save_path, "wb") as f_img:
+                                f_img.write(img_bytes)
+                            print(f"[SCREENSHOT EXAM] Saved exam violation proof for {student_id}: {exam_save_path}")
+                        except Exception as e:
+                            print(f"[SCREENSHOT EXAM ERROR] Failed to save exam violation proof: {e}")
+            
+            # Broadcast to all connected admins of the React Exam app
+            for admin_ws in list(exam_admin_connections):
+                try:
+                    await admin_ws.send_text(message)
+                except:
+                    exam_admin_connections.discard(admin_ws)
+                    
+    except WebSocketDisconnect:
+        print(f"[WS EXAM] Disconnected role={role}, student_id={student_id}")
+    finally:
+        if role == "admin":
+            exam_admin_connections.discard(websocket)
+        elif student_id:
+            exam_student_connections.pop(student_id, None)
 
 @app.websocket("/ws/stream")
 async def websocket_stream(websocket: WebSocket):
@@ -492,13 +849,34 @@ async def websocket_stream(websocket: WebSocket):
     Receives base64 encoded frames or binary image data, processes with YOLOv8,
     and returns detected objects, alerts, statistics, and the annotated frame.
     """
+    global current_session_dir, pending_exam_violations
     await websocket.accept()
     print("[WEBSOCKET] Client connected for streaming.")
     
     tracker = CandidateTracker(max_disappeared=20, distance_threshold=200)
-    violation_tracker = ViolationTracker(max_disappeared=15)
+    violation_tracker = ViolationTracker(max_disappeared=5)
     session_active = False
     initial_candidates = {}
+    
+    # State counters for Webcam Mode (cumulative temporal filters to avoid jitter)
+    out_of_frame_frames = 0
+    head_turn_frames = 0
+    glance_frames = 0
+    
+    # Time trackers for head turning
+    head_turn_start_time = None
+    last_profile_detected_time = None
+    
+    # Time trackers for eye glancing
+    glance_start_time = None
+    
+    # Time trackers for out of frame
+    out_of_frame_start_time = None
+    last_glance_detected_time = None
+    
+    # Cooldown tracking for saving violation screenshots during exam sessions
+    last_screenshot_time = 0
+    exam_session_active = False
     
     try:
         while True:
@@ -508,8 +886,44 @@ async def websocket_stream(websocket: WebSocket):
             
             # Extract frame data (base64 string) and settings
             frame_data = data.get("image") # format: data:image/jpeg;base64,...
-            conf_threshold = float(data.get("threshold", 0.35))
+            conf_threshold = float(data.get("threshold") or 0.35)
+            max_disappeared_time = float(data.get("max_disappeared_time") or 3.0)
+            look_away_time = float(data.get("look_away_time") or 3.0)
             exam_active = bool(data.get("exam_active", False))
+            monitoring_mode = data.get("monitoring_mode", "cctv")
+            student_id = data.get("student_id")
+            
+            # Track exam session state transition to create new session directory
+            if exam_active:
+                if not exam_session_active:
+                    exam_session_active = True
+                    import datetime
+                    try:
+                        now = datetime.datetime.now()
+                        day_str = now.strftime("%d")
+                        month_str = now.strftime("%m")
+                        year_str = now.strftime("%Y")
+                        log_base_dir = r"D:\tài liệu\ie101\model\LOG phiên"
+                        os.makedirs(log_base_dir, exist_ok=True)
+                        
+                        # Find existing session folders for today
+                        prefix = f"ngày {day_str} tháng {month_str} năm {year_str} phiên "
+                        existing_folders = [d for d in os.listdir(log_base_dir) if os.path.isdir(os.path.join(log_base_dir, d)) and d.startswith(prefix)]
+                        
+                        n = len(existing_folders) + 1
+                        session_folder_name = f"{prefix}{n}"
+                        current_session_dir = os.path.join(log_base_dir, session_folder_name)
+                        os.makedirs(current_session_dir, exist_ok=True)
+                        
+                        # Create subfolders
+                        os.makedirs(os.path.join(current_session_dir, "camera"), exist_ok=True)
+                        os.makedirs(os.path.join(current_session_dir, "Exam"), exist_ok=True)
+                        print(f"[SESSION] Created new session folder: {current_session_dir} with camera and Exam subfolders")
+                    except Exception as e:
+                        print(f"[SESSION ERROR] Failed to create session folder: {e}")
+            else:
+                exam_session_active = False
+                current_session_dir = None
             
             if not frame_data:
                 continue
@@ -524,250 +938,587 @@ async def websocket_stream(websocket: WebSocket):
                 continue
                 
             h, w, _ = frame.shape
+            current_time = time.time()
             
-            # Run YOLOv8 detection
-            person_detections = []
-            raw_violations = []
-            
-            if custom_model is not None:
-                # 1. Base model for Person (0) and Laptop (63)
-                # Optimize CPU latency by resizing base model input to imgsz=480
-                results_base = model.predict(
-                    source=frame,
-                    classes=[0, 63],
-                    conf=conf_threshold,
-                    verbose=False,
-                    imgsz=480
-                )
-                for box in results_base[0].boxes:
-                    coords = box.xyxy[0].tolist()
-                    conf = float(box.conf[0])
-                    cls = int(box.cls[0])
-                    if cls == 0:
-                        person_detections.append((coords, conf))
-                    elif cls == 63:
-                        raw_violations.append((coords, conf, 63))
-                
-                # 2. Custom model for Mobile phone (0) and Book (1)
-                # Run custom model with imgsz=512 (matching the native optimized training size)
-                # Since we added empty classroom and chair backgrounds, the model is already robust against false positives,
-                # so we can use the user-defined conf_threshold directly for maximum sensitivity.
-                results_custom = custom_model.predict(
-                    source=frame,
-                    classes=[0, 1],
-                    conf=conf_threshold,
-                    verbose=False,
-                    imgsz=512
-                )
-                for box in results_custom[0].boxes:
-                    coords = box.xyxy[0].tolist()
-                    conf = float(box.conf[0])
-                    cls = int(box.cls[0])
-                    # Map custom class IDs to standard COCO IDs:
-                    # Custom 0 (Mobile phone) -> COCO 67 (cell phone)
-                    # Custom 1 (Book) -> COCO 73 (book)
-                    if cls == 0:
-                        mapped_cls = 67
-                    elif cls == 1:
-                        mapped_cls = 73
-                    else:
-                        continue
-                        
-                    # Prevent false positives where the custom model misclassifies a person as a phone/book.
-                    # If the custom box overlaps heavily with a candidate's person box (IoU > 0.30)
-                    # or takes up too much of the person box area (area_ratio > 0.30), it is a false positive.
-                    is_false_positive = False
-                    for p_box, _ in person_detections:
-                        xA = max(p_box[0], coords[0])
-                        yA = max(p_box[1], coords[1])
-                        xB = min(p_box[2], coords[2])
-                        yB = min(p_box[3], coords[3])
-                        
-                        interArea = max(0, xB - xA) * max(0, yB - yA)
-                        p_area = (p_box[2] - p_box[0]) * (p_box[3] - p_box[1])
-                        c_area = (coords[2] - coords[0]) * (coords[3] - coords[1])
-                        
-                        iou = interArea / float(p_area + c_area - interArea + 1e-6)
-                        area_ratio = c_area / float(p_area + 1e-6)
-                        
-                        if iou > 0.80 or area_ratio > 0.80:
-                            is_false_positive = True
-                            break
-                            
-                    if is_false_positive:
-                        continue
-                    
-                    raw_violations.append((coords, conf, mapped_cls))
-            else:
-                # Fallback to standard base model only
-                target_classes = [0, 63, 67, 73]
-                results = model.predict(
-                    source=frame,
-                    classes=target_classes,
-                    conf=conf_threshold,
-                    verbose=False,
-                    imgsz=512
-                )
-                for box in results[0].boxes:
-                    coords = box.xyxy[0].tolist()
-                    conf = float(box.conf[0])
-                    cls = int(box.cls[0])
-                    if cls == 0:
-                        person_detections.append((coords, conf))
-                    else:
-                        raw_violations.append((coords, conf, cls))
-            
-            # Merge fragmented/split person detections before tracking
-            person_detections = merge_person_detections(person_detections)
-            
-            # Update candidate tracker with person detections
-            tracked_candidates = tracker.update(person_detections)
-            
-            # Apply Non-Maximum Suppression (NMS) to eliminate duplicate boxes (e.g. 1 phone showing 2 boxes)
-            raw_violations = apply_violation_nms(raw_violations)
-            
-            # Update violation tracker with raw violations to smooth and persist boxes
-            other_boxes = violation_tracker.update(raw_violations)
-            
-            # Handle exam session transitions
-            if exam_active and not session_active:
-                session_active = True
-                initial_candidates = {
-                    label: {
-                        "centroid": tracker.candidates[label],
-                        "bbox": tracker.bboxes[label]
-                    }
-                    for label in tracker.candidates
-                }
-                print(f"[EXAM] Session started. Locked {len(initial_candidates)} candidates: {list(initial_candidates.keys())}")
-            elif not exam_active and session_active:
-                session_active = False
-                initial_candidates = {}
-                print("[EXAM] Session ended.")
-                
+            violations = []
+            detections_log = []
             num_persons = 0
             num_phones = 0
             num_laptops = 0
             num_books = 0
             
-            violations = []
-            detections_log = []
-            
             # Bounding box drawing styles (BGR colors)
-            COLOR_PERSON = (255, 120, 0)   # Electric Blue-ish
-            COLOR_PHONE = (68, 68, 239)    # Crimson Red
-            COLOR_VIOLATION = (0, 140, 255) # Warning Orange
+            COLOR_PERSON = (255, 120, 0)    # Electric Blue-ish
+            COLOR_PHONE = (68, 68, 239)     # Crimson Red
+            COLOR_VIOLATION = (0, 140, 255)  # Warning Orange
             
-            # Draw tracked candidates
-            for label, coords in tracked_candidates.items():
-                num_persons += 1
-                conf = tracker.confs.get(label, 1.0)
-                x1, y1, x2, y2 = map(int, coords)
+            if monitoring_mode == "webcam":
+                # ==========================================
+                # DIRECTION 2: WEBCAM MODE (Personal Proctoring)
+                # ==========================================
                 
-                # Dynamic labels using tracked IDs
-                display_label = f"Candidate {label}: {conf:.2f}"
+                # Grayscale for Haar Cascade detection
+                gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+                gray = cv2.equalizeHist(gray) # Improve contrast dynamically
                 
-                # Draw bounding box
-                cv2.rectangle(frame, (x1, y1), (x2, y2), COLOR_PERSON, 2)
+                # Detect frontal faces
+                faces = []
+                profile_detected = False
                 
-                # Draw custom label tag
-                tf = max(1, int(1)) # font thickness
-                label_size, base_line = cv2.getTextSize(display_label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, tf)
-                ty1 = max(y1, label_size[1] + 10)
-                cv2.rectangle(frame, (x1, ty1 - label_size[1] - 8), (x1 + label_size[0] + 10, ty1 + base_line - 4), COLOR_PERSON, -1)
-                cv2.putText(frame, display_label, (x1 + 5, ty1 - 4), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), tf, lineType=cv2.LINE_AA)
+                if face_cascade is not None:
+                    faces = face_cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=4, minSize=(60, 60))
+                    
+                if len(faces) == 0 and profile_cascade is not None:
+                    # No frontal face found, try profile face (sideways head turning)
+                    profiles = profile_cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=4, minSize=(60, 60))
+                    if len(profiles) > 0:
+                        profile_detected = True
+                        faces = profiles
                 
-                detections_log.append({
-                    "class": f"Person ({label})",
-                    "confidence": conf,
-                    "box": [x1, y1, x2, y2]
-                })
-                
-            # Draw other non-person violations
-            for item in other_boxes:
-                coords = item["coords"]
-                conf = item["conf"]
-                cls = item["cls"]
-                
-                x1, y1, x2, y2 = map(int, coords)
-                
-                if cls == 67:
-                    num_phones += 1
-                    display_label = f"VIOLATION: PHONE {conf:.2f}"
-                    color = COLOR_PHONE
-                    violations.append("Phát hiện điện thoại!")
-                elif cls == 63:
-                    num_laptops += 1
-                    display_label = f"VIOLATION: LAPTOP {conf:.2f}"
-                    color = COLOR_VIOLATION
-                    violations.append("Phát hiện laptop/màn hình!")
-                elif cls == 73:
-                    num_books += 1
-                    display_label = f"VIOLATION: BOOK {conf:.2f}"
-                    color = COLOR_VIOLATION
-                    violations.append("Phát hiện tài liệu/sách!")
-                
-                # Draw bounding box
-                cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
-                
-                # Draw custom label tag
-                tf = max(1, int(1))
-                label_size, base_line = cv2.getTextSize(display_label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, tf)
-                ty1 = max(y1, label_size[1] + 10)
-                cv2.rectangle(frame, (x1, ty1 - label_size[1] - 8), (x1 + label_size[0] + 10, ty1 + base_line - 4), color, -1)
-                cv2.putText(frame, display_label, (x1 + 5, ty1 - 4), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), tf, lineType=cv2.LINE_AA)
-                
-                detections_log.append({
-                    "class": model.names[cls],
-                    "confidence": conf,
-                    "box": [x1, y1, x2, y2]
-                })
-            
-            # Rule engine for exam proctoring
-            if session_active:
-                # 1. Check if any initial candidate has disappeared/left position
-                for init_lbl in initial_candidates:
-                    if init_lbl not in tracker.bboxes:
-                        violations.append(f"Thí sinh {init_lbl} đã rời khỏi vị trí!")
-                
-                # 2. Check if any candidate has moved significantly
-                for init_lbl, init_data in initial_candidates.items():
-                    if init_lbl in tracker.candidates:
-                        curr_c = tracker.candidates[init_lbl]
-                        init_c = init_data["centroid"]
-                        dist = math.sqrt((curr_c[0] - init_c[0])**2 + (curr_c[1] - init_c[1])**2)
-                        if dist > 100:
-                            violations.append(f"Thí sinh {init_lbl} rời khỏi vị trí ({int(dist)}px)!")
+                if len(faces) == 0:
+                    # No candidate visible in frame
+                    out_of_frame_frames += 1
+                    glance_frames = max(0, glance_frames - 1)
+                    head_turn_frames = max(0, head_turn_frames - 1)
+                    head_turn_start_time = None
+                    last_profile_detected_time = None
+                    glance_start_time = None
+                    last_glance_detected_time = None
+                    if out_of_frame_start_time is None:
+                        out_of_frame_start_time = current_time
+                else:
+                    out_of_frame_frames = 0
+                    out_of_frame_start_time = None
+                    
+                    # We have a candidate, focus on the primary face
+                    fx, fy, fw, fh = faces[0]
+                    
+                    # Sci-fi corner-only reticle overlay for a premium tech feel
+                    COLOR_FACE = (16, 185, 129) if not profile_detected else (0, 140, 255) # Green vs Orange
+                    length = 15
+                    cv2.rectangle(frame, (fx, fy), (fx+fw, fy+fh), COLOR_FACE, 1)
+                    # Top-Left corner
+                    cv2.line(frame, (fx, fy), (fx + length, fy), COLOR_FACE, 2)
+                    cv2.line(frame, (fx, fy), (fx, fy + length), COLOR_FACE, 2)
+                    # Top-Right corner
+                    cv2.line(frame, (fx+fw, fy), (fx+fw - length, fy), COLOR_FACE, 2)
+                    cv2.line(frame, (fx+fw, fy), (fx+fw, fy + length), COLOR_FACE, 2)
+                    # Bottom-Left corner
+                    cv2.line(frame, (fx, fy+fh), (fx + length, fy+fh), COLOR_FACE, 2)
+                    cv2.line(frame, (fx, fy+fh), (fx, fy+fh - length), COLOR_FACE, 2)
+                    # Bottom-Right corner
+                    cv2.line(frame, (fx+fw, fy+fh), (fx+fw - length, fy+fh), COLOR_FACE, 2)
+                    cv2.line(frame, (fx+fw, fy+fh), (fx+fw, fy+fh - length), COLOR_FACE, 2)
+                    
+                    current_time = time.time()
+                    if profile_detected:
+                        # Sideways head turn registered
+                        head_turn_frames += 1
+                        glance_frames = max(0, glance_frames - 1) # Slowly decay glance frames when head is turned
+                        
+                        # Reset glance timers when head is turned sideways
+                        glance_start_time = None
+                        last_glance_detected_time = None
+                        
+                        last_profile_detected_time = current_time
+                        if head_turn_start_time is None:
+                            head_turn_start_time = current_time
+                        
+                        elapsed_time = current_time - head_turn_start_time
+                        if elapsed_time > look_away_time:
+                            violations.append("Thí sinh quay đầu sang hai bên!")
+                    else:
+                        head_turn_frames = max(0, head_turn_frames - 1) # Slowly decay head turn
+                        
+                        # Grace period of 1.0 second: only reset if no profile is detected for > 1.0s
+                        if head_turn_start_time is not None:
+                            if last_profile_detected_time is not None and (current_time - last_profile_detected_time > 1.0):
+                                head_turn_start_time = None
+                                last_profile_detected_time = None
+                        
+                        # Frontal face -> Check eye presence to detect glances
+                        roi_gray = gray[fy:fy+fh, fx:fx+fw]
+                        eyes = []
+                        if eye_cascade is not None:
+                            eyes = eye_cascade.detectMultiScale(roi_gray, scaleFactor=1.1, minNeighbors=4, minSize=(15, 15))
+                        
+                        # Draw blue sci-fi target circles on eyes
+                        for (ex, ey, ew, eh) in eyes:
+                            ecX = fx + ex + ew // 2
+                            ecY = fy + ey + eh // 2
+                            cv2.circle(frame, (ecX, ecY), min(ew, eh) // 2, (241, 102, 99), 1) # Indigo outer circle
+                            cv2.circle(frame, (ecX, ecY), 2, (255, 255, 255), -1) # White center pupil
+                        
+                        if len(eyes) < 2:
+                            # Glancing away or eyes obscured
+                            glance_frames += 1
                             
-                # 3. Check if any new candidate appeared (intruder)
-                for curr_lbl in tracker.bboxes:
-                    if curr_lbl not in initial_candidates:
-                        violations.append(f"Phát hiện người lạ/người khác xuất hiện: {curr_lbl}!")
-            else:
-                # Non-active session, standard warning if zero candidates
-                if num_persons == 0:
-                    violations.append("Không có thí sinh trong khung hình!")
+                            last_glance_detected_time = current_time
+                            if glance_start_time is None:
+                                glance_start_time = current_time
+                            
+                            elapsed_time = current_time - glance_start_time
+                            if elapsed_time > look_away_time:
+                                violations.append("Thí sinh liếc mắt / nhìn ra ngoài!")
+                        else:
+                            glance_frames = max(0, glance_frames - 2) # Slowly recover
+                            
+                            # Grace period of 1.0 second: only reset if eyes are detected (not glancing) for > 1.0s
+                            if glance_start_time is not None:
+                                if last_glance_detected_time is not None and (current_time - last_glance_detected_time > 1.0):
+                                    glance_start_time = None
+                                    last_glance_detected_time = None
+                            
+                # Run YOLOv8 for violations (smart devices, laptops, books)
+                raw_violations = []
+                if custom_model is not None:
+                    # Base model for Laptop (63), Cell Phone (67), Book (73)
+                    results_base = model.predict(source=frame, classes=[63, 67, 73], conf=conf_threshold, verbose=False, imgsz=480)
+                    for box in results_base[0].boxes:
+                        coords = box.xyxy[0].tolist()
+                        conf = float(box.conf[0])
+                        cls = int(box.cls[0])
+                        print(f"[WEBCAM BASE DETECT] cls: {cls}, conf: {conf:.2f}, size: {int(coords[2]-coords[0])}x{int(coords[3]-coords[1])}")
+                        if cls == 67:
+                            # Double-shield filter: Cell phones must have higher confidence to prevent false alarms in Webcam mode
+                            min_phone_conf = max(conf_threshold + 0.10, 0.45)
+                            if conf < min_phone_conf:
+                                continue
+                            p_w = coords[2] - coords[0]
+                            p_h = coords[3] - coords[1]
+                            if p_w > 350 or p_h > 350:
+                                continue
+                        
+                        # Suppress face misdetection as a phone/violation in Webcam mode
+                        is_face_fp = False
+                        for (fx, fy, fw, fh) in faces:
+                            xA = max(fx, coords[0])
+                            yA = max(fy, coords[1])
+                            xB = min(fx + fw, coords[2])
+                            yB = min(fy + fh, coords[3])
+                            interArea = max(0, xB - xA) * max(0, yB - yA)
+                            boxArea = (coords[2] - coords[0]) * (coords[3] - coords[1])
+                            containment = interArea / float(boxArea + 1e-6)
+                            if containment > 0.55:
+                                is_face_fp = True
+                                break
+                        if is_face_fp:
+                            print(f"[SUPPRESSION] Suppressed face FP base detection as violation: class {cls}, conf {conf:.2f}")
+                            continue
+                                
+                        raw_violations.append((coords, conf, cls))
+                    
+                    # Custom model for Phone (0), Book (1), and Casio (2)
+                    results_custom = custom_model.predict(source=frame, classes=[0, 1, 2], conf=conf_threshold, verbose=False, imgsz=512)
+                    for box in results_custom[0].boxes:
+                        coords = box.xyxy[0].tolist()
+                        conf = float(box.conf[0])
+                        cls = int(box.cls[0])
+                        print(f"[WEBCAM CUSTOM DETECT] cls: {cls}, conf: {conf:.2f}, size: {int(coords[2]-coords[0])}x{int(coords[3]-coords[1])}")
+                        if cls == 0:
+                            mapped_cls = 67
+                            # Double-shield filter: Cell phones must have higher confidence to prevent false alarms in Webcam mode
+                            min_phone_conf = max(conf_threshold + 0.10, 0.45)
+                            if conf < min_phone_conf:
+                                continue
+                            p_w = coords[2] - coords[0]
+                            p_h = coords[3] - coords[1]
+                            if p_w > 350 or p_h > 350:
+                                continue
+                        elif cls == 1:
+                            mapped_cls = 73
+                        elif cls == 2:
+                            mapped_cls = 2
+                        else:
+                            continue
+                        
+                        # Suppress face misdetection as a phone/violation in Webcam mode
+                        is_face_fp = False
+                        for (fx, fy, fw, fh) in faces:
+                            xA = max(fx, coords[0])
+                            yA = max(fy, coords[1])
+                            xB = min(fx + fw, coords[2])
+                            yB = min(fy + fh, coords[3])
+                            interArea = max(0, xB - xA) * max(0, yB - yA)
+                            boxArea = (coords[2] - coords[0]) * (coords[3] - coords[1])
+                            containment = interArea / float(boxArea + 1e-6)
+                            if containment > 0.55:
+                                is_face_fp = True
+                                break
+                        if is_face_fp:
+                            print(f"[SUPPRESSION] Suppressed face FP custom detection as violation: class {mapped_cls}, conf {conf:.2f}")
+                            continue
+                                
+                        raw_violations.append((coords, conf, mapped_cls))
+                else:
+                    # Fallback to standard base model
+                    results = model.predict(source=frame, classes=[63, 67, 73], conf=conf_threshold, verbose=False, imgsz=512)
+                    for box in results[0].boxes:
+                        coords = box.xyxy[0].tolist()
+                        conf = float(box.conf[0])
+                        cls = int(box.cls[0])
+                        if cls == 67:
+                            min_phone_conf = conf_threshold
+                            if conf < min_phone_conf:
+                                continue
+                            p_w = coords[2] - coords[0]
+                            p_h = coords[3] - coords[1]
+                            if p_w > 350 or p_h > 350:
+                                continue
+                        
+                        # Suppress face misdetection as a phone/violation in Webcam mode
+                        is_face_fp = False
+                        for (fx, fy, fw, fh) in faces:
+                            xA = max(fx, coords[0])
+                            yA = max(fy, coords[1])
+                            xB = min(fx + fw, coords[2])
+                            yB = min(fy + fh, coords[3])
+                            interArea = max(0, xB - xA) * max(0, yB - yA)
+                            boxArea = (coords[2] - coords[0]) * (coords[3] - coords[1])
+                            containment = interArea / float(boxArea + 1e-6)
+                            if containment > 0.55:
+                                is_face_fp = True
+                                break
+                        if is_face_fp:
+                            print(f"[SUPPRESSION] Suppressed face FP fallback detection as violation: class {cls}, conf {conf:.2f}")
+                            continue
+                                
+                        raw_violations.append((coords, conf, cls))
                 
-            # Calculate Suspicion Index (0 - 100)
-            suspicion_index = 0
-            if num_phones > 0:
-                suspicion_index = 100
-            elif any("rời khỏi vị trí" in v or "người lạ" in v or "người khác" in v for v in violations):
-                suspicion_index = 90
-            elif num_laptops > 0 or num_books > 0:
-                suspicion_index = 60
-            elif num_persons == 0:
-                suspicion_index = 40
-            else:
+                # Reset out-of-frame count and timer if there is any active violation (phone, laptop, book) 
+                # to prevent face-occlusion false alarms (e.g. candidate blocking their face with a phone).
+                if len(raw_violations) > 0:
+                    out_of_frame_frames = 0
+                    out_of_frame_start_time = None
+                    
+                # Time-based out-of-frame alert: triggers after exactly max_disappeared_time seconds of absence.
+                if out_of_frame_start_time is not None:
+                    out_of_frame_elapsed = current_time - out_of_frame_start_time
+                    if out_of_frame_elapsed > max_disappeared_time:
+                        violations.append("Thí sinh rời khỏi khung hình!")
+                
+                # Post-processing violations (NMS and overlaps)
+                raw_violations = apply_violation_nms(raw_violations)
+                raw_violations = resolve_cross_class_overlaps(raw_violations)
+                other_boxes = violation_tracker.update(raw_violations)
+                
+                # Draw Webcam violations
+                for item in other_boxes:
+                    coords = item["coords"]
+                    conf = item["conf"]
+                    cls = item["cls"]
+                    x1, y1, x2, y2 = map(int, coords)
+                    
+                    if cls == 67:
+                        num_phones += 1
+                        display_label = f"VIOLATION: SMART DEVICE {conf:.2f}"
+                        color = COLOR_PHONE
+                        violations.append("Phát hiện điện thoại!")
+                    elif cls == 63:
+                        num_laptops += 1
+                        display_label = f"VIOLATION: SMART DEVICE {conf:.2f}"
+                        color = COLOR_PHONE
+                        violations.append("Phát hiện laptop/màn hình!")
+                    elif cls == 73:
+                        num_books += 1
+                        display_label = f"VIOLATION: BOOK {conf:.2f}"
+                        color = COLOR_VIOLATION
+                        violations.append("Phát hiện tài liệu/sách!")
+                    elif cls == 2:
+                        display_label = f"VIOLATION: CASIO CALCULATOR {conf:.2f}"
+                        color = COLOR_VIOLATION
+                        violations.append("Phát hiện máy tính Casio!")
+                    
+                    cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
+                    tf = max(1, int(1))
+                    label_size, base_line = cv2.getTextSize(display_label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, tf)
+                    ty1 = max(y1, label_size[1] + 10)
+                    cv2.rectangle(frame, (x1, ty1 - label_size[1] - 8), (x1 + label_size[0] + 10, ty1 + base_line - 4), color, -1)
+                    cv2.putText(frame, display_label, (x1 + 5, ty1 - 4), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), tf, lineType=cv2.LINE_AA)
+                    
+                    detections_log.append({
+                        "class": model.names[cls] if cls in model.names else f"Class {cls}",
+                        "confidence": conf,
+                        "box": [x1, y1, x2, y2]
+                    })
+                
+                # Calculate Webcam Suspicion Index
                 suspicion_index = 0
+                if num_phones > 0:
+                    suspicion_index = 100
+                elif any("quay đầu" in v or "liếc mắt" in v for v in violations):
+                    suspicion_index = 75
+                elif num_laptops > 0 or num_books > 0 or any("Casio" in v for v in violations):
+                    suspicion_index = 60
+                elif any("rời khỏi khung hình" in v for v in violations):
+                    suspicion_index = 40
+                else:
+                    suspicion_index = 0
+                    
+            else:
+                # ==========================================
+                # DIRECTION 1: CCTV MODE (Room Proctoring)
+                # ==========================================
+                person_detections = []
+                raw_violations = []
+                if custom_model is not None:
+                    # 1. Base model for Person (0), Laptop (63), Cell Phone (67), Book (73)
+                    results_base = model.predict(source=frame, classes=[0, 63, 67, 73], conf=conf_threshold, verbose=False, imgsz=480)
+                    for box in results_base[0].boxes:
+                        coords = box.xyxy[0].tolist()
+                        conf = float(box.conf[0])
+                        cls = int(box.cls[0])
+                        print(f"[CCTV BASE DETECT] cls: {cls}, conf: {conf:.2f}, size: {int(coords[2]-coords[0])}x{int(coords[3]-coords[1])}")
+                        if cls == 0:
+                            person_detections.append((coords, conf))
+                        else:
+                            if cls == 67:
+                                min_phone_conf = conf_threshold
+                                if conf < min_phone_conf:
+                                    continue
+                                p_w = coords[2] - coords[0]
+                                p_h = coords[3] - coords[1]
+                                if p_w > 350 or p_h > 350:
+                                    continue
+                            raw_violations.append((coords, conf, cls))
+                    
+                    # 2. Custom model for Phone (0), Book (1), and Casio (2)
+                    results_custom = custom_model.predict(source=frame, classes=[0, 1, 2], conf=conf_threshold, verbose=False, imgsz=512)
+                    for box in results_custom[0].boxes:
+                        coords = box.xyxy[0].tolist()
+                        conf = float(box.conf[0])
+                        cls = int(box.cls[0])
+                        print(f"[CCTV CUSTOM DETECT] cls: {cls}, conf: {conf:.2f}, size: {int(coords[2]-coords[0])}x{int(coords[3]-coords[1])}")
+                        if cls == 0:
+                            mapped_cls = 67
+                            min_phone_conf = conf_threshold
+                            if conf < min_phone_conf:
+                                continue
+                            p_w = coords[2] - coords[0]
+                            p_h = coords[3] - coords[1]
+                            if p_w > 350 or p_h > 350:
+                                continue
+                        elif cls == 1:
+                            mapped_cls = 73
+                        elif cls == 2:
+                            mapped_cls = 2
+                        else:
+                            continue
+                            
+                        # Prevent false positives with person boxes
+                        is_false_positive = False
+                        for p_box, _ in person_detections:
+                            xA = max(p_box[0], coords[0])
+                            yA = max(p_box[1], coords[1])
+                            xB = min(p_box[2], coords[2])
+                            yB = min(p_box[3], coords[3])
+                            
+                            interArea = max(0, xB - xA) * max(0, yB - yA)
+                            p_area = (p_box[2] - p_box[0]) * (p_box[3] - p_box[1])
+                            c_area = (coords[2] - coords[0]) * (coords[3] - coords[1])
+                            
+                            iou = interArea / float(p_area + c_area - interArea + 1e-6)
+                            area_ratio = c_area / float(p_area + 1e-6)
+                            
+                            if iou > 0.80 or area_ratio > 0.80:
+                                is_false_positive = True
+                                break
+                                
+                        if is_false_positive:
+                            continue
+                        raw_violations.append((coords, conf, mapped_cls))
+                else:
+                    # Fallback to standard base model only
+                    results = model.predict(source=frame, classes=[0, 63, 67, 73], conf=conf_threshold, verbose=False, imgsz=512)
+                    for box in results[0].boxes:
+                        coords = box.xyxy[0].tolist()
+                        conf = float(box.conf[0])
+                        cls = int(box.cls[0])
+                        if cls == 0:
+                            person_detections.append((coords, conf))
+                        else:
+                            if cls == 67:
+                                min_phone_conf = conf_threshold
+                                if conf < min_phone_conf:
+                                    continue
+                                p_w = coords[2] - coords[0]
+                                p_h = coords[3] - coords[1]
+                                if p_w > 350 or p_h > 350:
+                                    continue
+                            raw_violations.append((coords, conf, cls))
                 
+                # Merge fragmented/split person detections before tracking
+                person_detections = merge_person_detections(person_detections)
+                
+                # Update candidate tracker with person detections
+                tracked_candidates = tracker.update(person_detections)
+                
+                # Continuous defragmentation before starting the exam session
+                if not session_active:
+                    tracker.defragment()
+                    tracked_candidates = tracker.bboxes
+                
+                # Post-processing violations (NMS and overlaps)
+                raw_violations = apply_violation_nms(raw_violations)
+                raw_violations = resolve_cross_class_overlaps(raw_violations)
+                other_boxes = violation_tracker.update(raw_violations)
+                
+                # Handle exam session transitions
+                if exam_active and not session_active:
+                    session_active = True
+                    initial_candidates = {
+                        label: {
+                            "centroid": tracker.candidates[label],
+                            "bbox": tracker.bboxes[label]
+                        }
+                        for label in tracker.candidates
+                    }
+                    print(f"[EXAM] Session started. Locked {len(initial_candidates)} candidates: {list(initial_candidates.keys())}")
+                elif not exam_active and session_active:
+                    session_active = False
+                    initial_candidates = {}
+                    print("[EXAM] Session ended.")
+                
+                # Draw tracked candidates
+                for label, coords in tracked_candidates.items():
+                    num_persons += 1
+                    conf = tracker.confs.get(label, 1.0)
+                    x1, y1, x2, y2 = map(int, coords)
+                    display_label = f"Candidate {label}: {conf:.2f}"
+                    
+                    cv2.rectangle(frame, (x1, y1), (x2, y2), COLOR_PERSON, 2)
+                    tf = max(1, int(1))
+                    label_size, base_line = cv2.getTextSize(display_label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, tf)
+                    ty1 = max(y1, label_size[1] + 10)
+                    cv2.rectangle(frame, (x1, ty1 - label_size[1] - 8), (x1 + label_size[0] + 10, ty1 + base_line - 4), COLOR_PERSON, -1)
+                    cv2.putText(frame, display_label, (x1 + 5, ty1 - 4), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), tf, lineType=cv2.LINE_AA)
+                    
+                    detections_log.append({
+                        "class": f"Person ({label})",
+                        "confidence": conf,
+                        "box": [x1, y1, x2, y2]
+                    })
+                    
+                # Draw other non-person violations
+                for item in other_boxes:
+                    coords = item["coords"]
+                    conf = item["conf"]
+                    cls = item["cls"]
+                    x1, y1, x2, y2 = map(int, coords)
+                    
+                    if cls == 67:
+                        num_phones += 1
+                        display_label = f"VIOLATION: SMART DEVICE {conf:.2f}"
+                        color = COLOR_PHONE
+                        violations.append("Phát hiện điện thoại!")
+                    elif cls == 63:
+                        num_laptops += 1
+                        display_label = f"VIOLATION: SMART DEVICE {conf:.2f}"
+                        color = COLOR_PHONE
+                        violations.append("Phát hiện laptop/màn hình!")
+                    elif cls == 73:
+                        num_books += 1
+                        display_label = f"VIOLATION: BOOK {conf:.2f}"
+                        color = COLOR_VIOLATION
+                        violations.append("Phát hiện tài liệu/sách!")
+                    elif cls == 2:
+                        display_label = f"VIOLATION: CASIO CALCULATOR {conf:.2f}"
+                        color = COLOR_VIOLATION
+                        violations.append("Phát hiện máy tính Casio!")
+                    
+                    cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
+                    tf = max(1, int(1))
+                    label_size, base_line = cv2.getTextSize(display_label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, tf)
+                    ty1 = max(y1, label_size[1] + 10)
+                    cv2.rectangle(frame, (x1, ty1 - label_size[1] - 8), (x1 + label_size[0] + 10, ty1 + base_line - 4), color, -1)
+                    cv2.putText(frame, display_label, (x1 + 5, ty1 - 4), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), tf, lineType=cv2.LINE_AA)
+                    
+                    detections_log.append({
+                        "class": model.names[cls] if cls in model.names else f"Class {cls}",
+                        "confidence": conf,
+                        "box": [x1, y1, x2, y2]
+                    })
+                    
+                # Rule engine for exam proctoring
+                if session_active:
+                    for init_lbl in initial_candidates:
+                        if init_lbl not in tracker.bboxes:
+                            violations.append(f"Thí sinh {init_lbl} đã rời khỏi vị trí!")
+                    for init_lbl, init_data in initial_candidates.items():
+                        if init_lbl in tracker.candidates:
+                            curr_c = tracker.candidates[init_lbl]
+                            init_c = init_data["centroid"]
+                            dist = math.sqrt((curr_c[0] - init_c[0])**2 + (curr_c[1] - init_c[1])**2)
+                            if dist > 100:
+                                violations.append(f"Thí sinh {init_lbl} rời khỏi vị trí ({int(dist)}px)!")
+                    for curr_lbl in tracker.bboxes:
+                        if curr_lbl not in initial_candidates:
+                            violations.append(f"Phát hiện người lạ/người khác xuất hiện: {curr_lbl}!")
+                else:
+                    if num_persons == 0:
+                        violations.append("Không có thí sinh trong khung hình!")
+                
+                # Calculate Suspicion Index
+                suspicion_index = 0
+                if num_phones > 0:
+                    suspicion_index = 100
+                elif any("rời khỏi vị trí" in v or "người lạ" in v or "người khác" in v for v in violations):
+                    suspicion_index = 90
+                elif num_laptops > 0 or num_books > 0 or any("Casio" in v for v in violations):
+                    suspicion_index = 60
+                elif num_persons == 0:
+                    suspicion_index = 40
+                else:
+                    suspicion_index = 0
+            
+            # Check for pending exam violations
+            exam_alerts = []
+            if student_id:
+                sid = student_id.lower()
+                if sid in pending_exam_violations and pending_exam_violations[sid]:
+                    for alert in pending_exam_violations[sid]:
+                        exam_alerts.append(f"EXAM_ALERT: {alert['message']}")
+                    pending_exam_violations[sid] = []
+                
+                other_sid = sid[2:] if sid.startswith("id") else f"id{sid}"
+                if other_sid in pending_exam_violations and pending_exam_violations[other_sid]:
+                    for alert in pending_exam_violations[other_sid]:
+                        alert_msg = f"EXAM_ALERT: {alert['message']}"
+                        if alert_msg not in exam_alerts:
+                            exam_alerts.append(alert_msg)
+                    pending_exam_violations[other_sid] = []
+            violations.extend(exam_alerts)
+            
+            # Suppress all proctoring violations and suspicion index if session is inactive
+            if not exam_active or current_session_dir is None:
+                violations = []
+                suspicion_index = 0
+                num_phones = 0
+                num_laptops = 0
+                num_books = 0
+                out_of_frame_frames = 0
+                head_turn_frames = 0
+                glance_frames = 0
+                head_turn_start_time = None
+                glance_start_time = None
+                out_of_frame_start_time = None
+            
             # Encode annotated frame back to base64
             _, buffer = cv2.imencode(".jpg", frame)
             processed_base64 = "data:image/jpeg;base64," + base64.b64encode(buffer).decode("utf-8")
             
             # Prepare response payload
+            screen_img = None
+            if student_id:
+                sid = student_id.lower()
+                screen_img = student_screens.get(sid)
+                if not screen_img:
+                    other_sid = sid[2:] if sid.startswith("id") else f"id{sid}"
+                    screen_img = student_screens.get(other_sid)
+                
             response_payload = {
                 "image": processed_base64,
+                "screen_image": screen_img,
                 "metrics": {
                     "num_persons": num_persons,
                     "num_phones": num_phones,
@@ -779,6 +1530,28 @@ async def websocket_stream(websocket: WebSocket):
                 }
             }
             
+            # Save screenshot proof if the exam session is active and a camera violation is detected
+            if exam_active and len(violations) > 0 and current_session_dir is not None:
+                camera_violations = [v for v in violations if not v.startswith("EXAM_ALERT:")]
+                if len(camera_violations) > 0 and current_time - last_screenshot_time > 5.0:
+                    import datetime
+                    try:
+                        now_str = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+                        student_label = student_id if student_id else "id01"
+                        filename = f"{student_label}_{now_str}.jpg"
+                        
+                        save_path = os.path.join(current_session_dir, "camera", filename)
+                        
+                        # Encode and write safely using Python standard open to bypass OpenCV's Windows unicode path bug
+                        ret_val, img_encoded = cv2.imencode('.jpg', frame)
+                        if ret_val:
+                            with open(save_path, "wb") as f_img:
+                                f_img.write(img_encoded.tobytes())
+                            print(f"[SCREENSHOT] Saved webcam violation proof for {student_label}: {save_path}")
+                            last_screenshot_time = current_time
+                    except Exception as e:
+                        print(f"[SCREENSHOT ERROR] Failed to save webcam violation proof: {e}")
+            
             # Send back to client
             await websocket.send_text(json.dumps(response_payload))
             
@@ -786,6 +1559,8 @@ async def websocket_stream(websocket: WebSocket):
         print("[WEBSOCKET] Client disconnected.")
     except Exception as e:
         print(f"[WEBSOCKET ERROR] Error: {e}")
+        import traceback
+        traceback.print_exc()
         try:
             await websocket.close()
         except:
@@ -814,7 +1589,7 @@ def get_video_feed(camera_idx: int = 0):
             print(f"[CAMERA ERROR] Local camera index {camera_idx} could not be opened.")
             return
             
-        violation_tracker = ViolationTracker(max_disappeared=15)
+        violation_tracker = ViolationTracker(max_disappeared=5)
         
         try:
             while True:
@@ -839,16 +1614,26 @@ def get_video_feed(camera_idx: int = 0):
                             elif cls == 63:
                                 raw_violations.append((coords, conf, 63))
                                 
-                        # 2. Custom model for Mobile phone (0) and Book (1)
-                        results_custom = custom_model.predict(source=frame, classes=[0, 1], conf=0.35, verbose=False, imgsz=512)
+                        # 2. Custom model for Mobile phone (0), Book (1), and Casio (2)
+                        results_custom = custom_model.predict(source=frame, classes=[0, 1, 2], conf=0.35, verbose=False, imgsz=512)
                         for box in results_custom[0].boxes:
                             coords = box.xyxy[0].tolist()
                             conf = float(box.conf[0])
                             cls = int(box.cls[0])
                             if cls == 0:
                                 mapped_cls = 67
+                                # Apply double-shield filter for cell phones
+                                min_phone_conf = max(0.35 + 0.08, 0.43)
+                                if conf < min_phone_conf:
+                                    continue
+                                p_w = coords[2] - coords[0]
+                                p_h = coords[3] - coords[1]
+                                if p_w > 350 or p_h > 350:
+                                    continue
                             elif cls == 1:
                                 mapped_cls = 73
+                            elif cls == 2:
+                                mapped_cls = 2
                             else:
                                 continue
                                 
@@ -885,6 +1670,15 @@ def get_video_feed(camera_idx: int = 0):
                             if cls == 0:
                                 person_detections.append((coords, conf))
                             else:
+                                if cls == 67:
+                                    # Apply double-shield filter for cell phones
+                                    min_phone_conf = max(0.35 + 0.08, 0.43)
+                                    if conf < min_phone_conf:
+                                        continue
+                                    p_w = coords[2] - coords[0]
+                                    p_h = coords[3] - coords[1]
+                                    if p_w > 350 or p_h > 350:
+                                        continue
                                 raw_violations.append((coords, conf, cls))
                     
                     # Merge split person boxes
@@ -899,6 +1693,9 @@ def get_video_feed(camera_idx: int = 0):
                     # Apply Non-Maximum Suppression (NMS) to eliminate duplicate boxes (e.g. 1 phone showing 2 boxes)
                     raw_violations = apply_violation_nms(raw_violations)
 
+                    # Resolve overlapping boxes between different violation classes (e.g. Phone vs Laptop)
+                    raw_violations = resolve_cross_class_overlaps(raw_violations)
+
                     # Update violation tracker with raw violations to smooth and persist boxes
                     tracked_violations = violation_tracker.update(raw_violations)
 
@@ -908,12 +1705,15 @@ def get_video_feed(camera_idx: int = 0):
                         conf = item["conf"]
                         cls = item["cls"]
                         x1, y1, x2, y2 = map(int, coords)
-                        if cls == 67:
+                        if cls == 67 or cls == 63:
                             color = (68, 68, 239)
-                            label = f"PHONE: {conf:.2f}"
+                            label = f"VIOLATION: SMART DEVICE {conf:.2f}"
+                        elif cls == 2:
+                            color = (0, 140, 255)
+                            label = f"VIOLATION: CASIO CALCULATOR {conf:.2f}"
                         else:
                             color = (0, 140, 255)
-                            label = f"VIOLATION: {model.names[cls]} {conf:.2f}"
+                            label = f"VIOLATION: {model.names[cls] if cls in model.names else f'Class {cls}'} {conf:.2f}"
                         cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
                         cv2.putText(frame, label, (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1)
                 

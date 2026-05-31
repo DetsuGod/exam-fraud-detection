@@ -1,0 +1,2696 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI-Proctor Admin | Hệ Thống Giám Sát CCTV Phòng Thi</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-gradient: linear-gradient(135deg, #05050e 0%, #0c091d 50%, #010003 100%);
+            --glass-bg: rgba(10, 8, 22, 0.85);
+            --glass-border: rgba(255, 255, 255, 0.25);
+            --text-primary: #f8fafc;
+            --text-secondary: #94a3b8;
+            --accent-primary: #6366f1;
+            --success: #10b981;
+            --warning: #f59e0b;
+            --danger: #ef4444;
+            --font-main: 'Inter', sans-serif;
+            --font-mono: 'JetBrains Mono', monospace;
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: var(--font-main);
+            background: var(--bg-gradient);
+            color: var(--text-primary);
+            height: 100vh;
+            overflow: hidden;
+            display: flex;
+        }
+
+        .orb { position: absolute; border-radius: 50%; filter: blur(140px); z-index: -1; pointer-events: none; }
+        .orb-1 { width: 500px; height: 500px; background: rgba(99, 102, 241, 0.1); top: 5%; left: 5%; }
+        .orb-2 { width: 600px; height: 600px; background: rgba(239, 68, 68, 0.04); bottom: 5%; right: 5%; }
+
+        .app-sidebar {
+            width: 260px; background: rgba(6, 6, 16, 0.7); border-right: 1px solid var(--glass-border);
+            backdrop-filter: blur(16px); display: flex; flex-direction: column; z-index: 20; flex-shrink: 0;
+            overflow-y: auto;
+        }
+        .app-sidebar::-webkit-scrollbar { display: none; }
+
+        .sidebar-header { padding: 1.5rem; border-bottom: 1px solid rgba(255, 255, 255, 0.15); display: flex; align-items: center; gap: 1rem; position: sticky; top: 0; background: rgba(6, 6, 16, 0.9); z-index: 10; }
+        .logo-dot {
+            width: 12px; height: 12px; border-radius: 50%; background: var(--success);
+            box-shadow: 0 0 12px var(--success); animation: pulse-green 2s infinite;
+        }
+        @keyframes pulse-green { 0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7); } 70% { transform: scale(1); box-shadow: 0 0 0 10px rgba(16, 185, 129, 0); } 100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); } }
+        .sidebar-logo-text { font-size: 1.2rem; font-weight: 800; background: linear-gradient(to right, #ffffff, #c7d2fe); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+
+        .sidebar-nav { padding: 1.5rem 1rem; display: flex; flex-direction: column; gap: 0.5rem; flex: 1; }
+        .sidebar-link {
+            display: flex; align-items: center; gap: 1rem; padding: 1rem; border-radius: 8px; color: var(--text-secondary);
+            text-decoration: none; font-size: 0.95rem; font-weight: 500; transition: all 0.3s; cursor: pointer; border: 1px solid transparent;
+        }
+        .sidebar-link:hover { background: rgba(255, 255, 255, 0.05); color: #ffffff; }
+        .sidebar-link.active { background: rgba(99, 102, 241, 0.1); color: #ffffff; border-color: rgba(99, 102, 241, 0.4); box-shadow: 0 0 15px rgba(99, 102, 241, 0.15); }
+        .sidebar-link svg { width: 20px; height: 20px; flex-shrink: 0; }
+
+        .app-main-wrapper { flex: 1; display: flex; flex-direction: column; overflow: hidden; position: relative; }
+        
+        header {
+            padding: 1rem 1.5rem; background: transparent; border-bottom: 1px solid var(--glass-border);
+            display: flex; justify-content: space-between; align-items: center; z-index: 10; flex-shrink: 0;
+        }
+        .header-logo { display: flex; align-items: center; }
+        .back-btn {
+            background: rgba(255, 255, 255, 0.08); border: 1px solid var(--glass-border); border-radius: 6px;
+            color: #ffffff; font-family: var(--font-main); font-size: 0.8rem; font-weight: 600; padding: 0.35rem 0.8rem;
+            cursor: pointer; display: flex; align-items: center; transition: all 0.2s;
+        }
+        .back-btn:hover { background: rgba(255, 255, 255, 0.2); border-color: var(--accent-primary); }
+        .system-stats-bar { display: flex; gap: 1.5rem; align-items: center; }
+        .stat-item { display: flex; flex-direction: column; align-items: flex-end; }
+        .stat-label { font-size: 0.65rem; color: var(--text-secondary); text-transform: uppercase; font-weight: 600; }
+        .stat-val { font-family: var(--font-mono); font-size: 1.1rem; font-weight: 700; }
+        .stat-val.safe { color: var(--success); }
+        .stat-val.suspect { color: var(--warning); }
+        .stat-val.violating { color: var(--danger); }
+        .time-badge { background: rgba(255, 255, 255, 0.05); border: 1px solid var(--glass-border); padding: 0.4rem 0.8rem; border-radius: 8px; font-family: var(--font-mono); font-size: 0.95rem; font-weight: 500; }
+        
+        main {
+            flex: 1; display: flex; flex-direction: row; padding: 1.5rem; gap: 1.5rem; 
+            overflow-y: auto; overflow-x: hidden; align-items: flex-start;
+        }
+
+        .views-container { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+        .global-right-sidebar { width: 350px; display: flex; flex-direction: column; gap: 1.5rem; flex-shrink: 0; }
+
+        .view-section { display: none; flex-direction: column; animation: fadeIn 0.3s ease; gap: 1.5rem; }
+        .view-section.active-view { display: flex; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+
+        .panel-card {
+            background: var(--glass-bg); border: 1px solid var(--glass-border); border-radius: 16px;
+            padding: 1.25rem; box-shadow: 0 10px 30px rgba(0,0,0,0.5); backdrop-filter: blur(16px);
+            display: flex; flex-direction: column;
+        }
+        .panel-title {
+            font-size: 0.95rem; font-weight: 600; color: var(--text-primary);
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05); padding-bottom: 0.75rem;
+            margin-bottom: 1rem; display: flex; justify-content: space-between; align-items: center;
+        }
+        .panel-title span { font-size: 0.75rem; color: var(--text-secondary); font-weight: 400; }
+        
+        .toolbar { display: flex; justify-content: space-between; align-items: center; background: var(--glass-bg); padding: 1rem 1.5rem; border-radius: 12px; border: 1px solid var(--glass-border); }
+        .search-box { background: rgba(0,0,0,0.3); border: 1px solid var(--glass-border); padding: 0.6rem 1rem; border-radius: 8px; color: #fff; font-family: var(--font-main); width: 300px; outline: none; }
+        .filter-btn { background: rgba(99, 102, 241, 0.15); border: 1px solid rgba(99, 102, 241, 0.4); color: #c7d2fe; padding: 0.6rem 1.2rem; border-radius: 8px; cursor: pointer; font-weight: 600; transition: transform 0.2s, background 0.2s, box-shadow 0.2s; display: flex; align-items: center; gap: 0.4rem; justify-content: center;}
+        .filter-btn:hover { background: rgba(99, 102, 241, 0.25); }
+        .filter-btn:active { transform: translateY(1px); }
+        .filter-btn.import-btn:hover { transform: translateY(-1px); box-shadow: 0 12px 24px rgba(99,102,241,0.18); }
+
+        .cam-trigger-btn {
+            background: linear-gradient(135deg, #6366f1 0%, #818cf8 100%);
+            color: #ffffff;
+            border: none;
+            padding: 0.75rem 1rem;
+            border-radius: 10px;
+            font-family: var(--font-main);
+            font-size: 0.9rem;
+            font-weight: 700;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.5rem;
+            transition: transform 0.2s ease, background 0.2s ease, box-shadow 0.2s ease;
+            box-shadow: 0 10px 30px rgba(99, 102, 241, 0.12);
+        }
+        .cam-trigger-btn:hover {
+            background: linear-gradient(135deg, #4f46e5 0%, #6366f1 100%);
+            transform: translateY(-1px);
+        }
+        .cam-trigger-btn svg { fill: currentColor; }
+
+        .room-monitor-workspace { display: flex; flex-direction: column; gap: 1.25rem; }
+        .class-cctv-container { width: 100%; background: #020205; border-radius: 12px; border: 1px solid var(--glass-border); overflow: hidden; position: relative; aspect-ratio: 16/9; max-height: 480px; }
+        #class-cctv-canvas { width: 100%; height: 100%; object-fit: contain; display: block; }
+        .feed-label-tag { position: absolute; top: 0.4rem; left: 0.4rem; background: rgba(0, 0, 0, 0.75); border: 1px solid rgba(255, 255, 255, 0.2); color: #ffffff; font-size: 0.6rem; padding: 0.15rem 0.4rem; border-radius: 3px; font-family: var(--font-mono); font-weight: 500; z-index: 2; }
+        .laser-scanner { position: absolute; left: 0; right: 0; height: 2px; background: linear-gradient(to right, rgba(239, 68, 68, 0), rgba(239, 68, 68, 0.8), rgba(239, 68, 68, 0)); box-shadow: 0 0 10px 2px rgba(239, 68, 68, 0.3); animation: details-scan 3.5s linear infinite; pointer-events: none; z-index: 1; }
+        .laser-scanner.color-blue { background: linear-gradient(to right, rgba(99, 102, 241, 0), rgba(99, 102, 241, 0.8), rgba(99, 102, 241, 0)); box-shadow: 0 0 10px 2px rgba(99, 102, 241, 0.3); }
+        @keyframes details-scan { 0% { top: 0; opacity: 0; } 10% { opacity: 1; } 90% { opacity: 1; } 100% { top: 100%; opacity: 0; } }
+
+        .candidates-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 1rem; }
+        .candidate-card { background: rgba(12, 10, 32, 0.45); border: 1px solid var(--glass-border); border-radius: 10px; padding: 0.65rem; display: flex; flex-direction: column; gap: 0.5rem; cursor: pointer; transition: all 0.2s; }
+        .candidate-card:hover { transform: translateY(-2px); border-color: rgba(99, 102, 241, 0.5); background: rgba(22, 18, 54, 0.6); }
+        .candidate-card.active-selected { border-color: var(--accent-primary); background: rgba(28, 22, 70, 0.85); box-shadow: 0 0 12px rgba(99, 102, 241, 0.3); }
+        .candidate-card.status-danger { border-color: rgba(239, 68, 68, 0.7); }
+        .candidate-card.status-warning { border-color: rgba(245, 158, 11, 0.7); }
+        .candidate-header { display: flex; justify-content: space-between; align-items: center; }
+        .cand-info { display: flex; flex-direction: column; }
+        .cand-id { font-family: var(--font-mono); font-weight: 700; font-size: 0.85rem; }
+        .cand-name { font-size: 0.7rem; color: var(--text-secondary); }
+        .candidate-badge { font-size: 0.6rem; font-weight: 700; padding: 0.15rem 0.4rem; border-radius: 3px; text-transform: uppercase; }
+        .badge-safe { background: rgba(16, 185, 129, 0.12); color: var(--success); border: 1px solid var(--success); }
+        .badge-warning { background: rgba(245, 158, 11, 0.12); color: var(--warning); border: 1px solid var(--warning); }
+        .badge-danger { background: rgba(239, 68, 68, 0.12); color: var(--danger); border: 1px solid var(--danger); animation: pulse-danger-bg 2s infinite; }
+        .cand-feed-box { position: relative; width: 100%; aspect-ratio: 4/3; background: #020204; border-radius: 6px; overflow: hidden; border: 1px solid rgba(255,255,255,0.02); }
+        .candidate-canvas { width: 100%; height: 100%; display: block; }
+        .hud-overlay { position: absolute; top: 0.4rem; left: 0.4rem; right: 0.4rem; bottom: 0.4rem; pointer-events: none; display: flex; flex-direction: column; justify-content: space-between; font-family: var(--font-mono); font-size: 0.55rem; text-shadow: 0 1px 1px #000; }
+        .hud-top { display: flex; justify-content: space-between; color: rgba(255,255,255,0.5); }
+        .hud-bottom { display: flex; justify-content: space-between; align-items: flex-end; }
+        .susp-score-mini { display: flex; align-items: center; gap: 0.2rem; background: rgba(0,0,0,0.5); padding: 0.05rem 0.25rem; border-radius: 2px; }
+        .susp-dot { width: 5px; height: 5px; border-radius: 50%; display: inline-block; }
+
+        .cctv-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1.5rem; }
+        .cctv-card { background: rgba(15, 12, 38, 0.4); border: 1px solid var(--glass-border); border-radius: 14px; padding: 0.9rem; cursor: pointer; display: flex; flex-direction: column; gap: 0.75rem; position: relative; transition: all 0.3s; }
+        .cctv-card:hover { transform: translateY(-3px); border-color: rgba(99, 102, 241, 0.4); box-shadow: 0 12px 30px rgba(99, 102, 241, 0.15); background: rgba(22, 18, 54, 0.6); }
+        .cctv-card.alarm-warning { border-color: rgba(245, 158, 11, 0.6); box-shadow: 0 0 15px rgba(245, 158, 11, 0.15); }
+        .cctv-card.alarm-danger { border-color: rgba(239, 68, 68, 0.6); box-shadow: 0 0 20px rgba(239, 68, 68, 0.25); animation: pulse-danger-border 1.5s infinite; }
+        .cctv-header { display: flex; justify-content: space-between; align-items: center; }
+        .cctv-title { font-size: 1rem; font-weight: 700; color: #ffffff; }
+        .cctv-subject { font-size: 0.75rem; color: var(--text-secondary); }
+        .cctv-feed-box { position: relative; width: 100%; aspect-ratio: 16/9; background: #020204; border-radius: 8px; overflow: hidden; border: 1px solid rgba(255,255,255,0.03); }
+        .cctv-canvas { width: 100%; height: 100%; display: block; }
+
+        .alerts-panel { flex: 1; min-height: 250px; display: flex; flex-direction: column; transition: all 0.3s; }
+        .alerts-container { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 0.5rem; padding-right: 0.25rem; }
+        .alert-item { display: grid; grid-template-columns: 55px 1fr; gap: 0.5rem; padding: 0.55rem; border-radius: 8px; background: rgba(255, 255, 255, 0.05); border: 1px solid var(--glass-border); font-size: 0.72rem; cursor: pointer; transition: all 0.2s; }
+        .alert-item:hover { background: rgba(255, 255, 255, 0.1); transform: translateX(-2px); }
+        .alert-item.severity-critical { border-left: 3px solid var(--danger); background: rgba(239, 68, 68, 0.1); }
+        .alert-item.severity-warning { border-left: 3px solid var(--warning); background: rgba(245, 158, 11, 0.1); }
+        .alert-item.severity-info { border-left: 3px solid var(--success); background: rgba(16, 185, 129, 0.1); }
+        .alert-time { font-family: var(--font-mono); color: #94a3b8; }
+        .alert-content { display: flex; flex-direction: column; gap: 0.1rem; }
+        .alert-header { display: flex; justify-content: space-between; font-weight: 600; }
+        .alert-title-danger { color: #fca5a5; } .alert-title-warning { color: #fde047; } .alert-title-info { color: #6ee7b7; }
+
+        .alerts-table-container { background: var(--glass-bg); border: 1px solid var(--glass-border); border-radius: 16px; overflow: hidden; width: 100%; }
+        .alerts-table { width: 100%; border-collapse: collapse; text-align: left; }
+        .alerts-table th { padding: 1.2rem 1.5rem; background: rgba(255,255,255,0.05); color: var(--text-secondary); font-size: 0.8rem; text-transform: uppercase; letter-spacing: 1px; border-bottom: 1px solid var(--glass-border); white-space: nowrap; }
+        .alerts-table td { padding: 1.2rem 1.5rem; border-bottom: 1px solid rgba(255,255,255,0.05); font-size: 0.95rem; vertical-align: middle; }
+        .alerts-table tr:hover td { background: rgba(255,255,255,0.03); }
+        .alerts-table td.actions-col,
+        .alerts-table td:last-child { text-align: center; }
+        .alerts-table td:last-child button { margin: 0 auto; display: inline-block; }
+        .alert-tag { padding: 0.4rem 0.8rem; border-radius: 99px; font-size: 0.75rem; font-weight: 700; white-space: nowrap; display: inline-block;}
+        .tag-high { background: rgba(239, 68, 68, 0.15); color: #fca5a5; border: 1px solid rgba(239, 68, 68, 0.4); }
+        .tag-medium { background: rgba(245, 158, 11, 0.15); color: #fde047; border: 1px solid rgba(245, 158, 11, 0.4); }
+
+        .detail-panel { flex: none; display: flex; flex-direction: column; gap: 0.85rem; padding: 1.15rem; background: var(--glass-bg); border: 1px solid var(--glass-border); border-radius: 16px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); backdrop-filter: blur(16px); }
+        .detail-header-info { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 1px solid rgba(255, 255, 255, 0.15); padding-bottom: 0.6rem; }
+        .detail-cand-meta { display: flex; flex-direction: column; }
+        .detail-cand-title { font-size: 1.05rem; font-weight: 700; color: #ffffff; }
+        .detail-cand-sub { font-size: 0.72rem; color: var(--text-secondary); }
+        .detail-feed-box { position: relative; background: #020204; border-radius: 8px; overflow: hidden; border: 1px solid rgba(255, 255, 255, 0.15); aspect-ratio: 16/10; }
+        .detail-feed-canvas { width: 100%; height: 100%; display: block; }
+        .detail-suspicion { display: flex; flex-direction: column; gap: 0.25rem; background: rgba(255,255,255,0.03); padding: 0.5rem; border-radius: 6px; border: 1px solid var(--glass-border); }
+        .detail-suspicion-hdr { display: flex; justify-content: space-between; font-size: 0.75rem; font-weight: 600; }
+        .detail-suspicion-bar { height: 6px; background: rgba(255,255,255,0.1); border-radius: 3px; overflow: hidden; }
+        .detail-suspicion-fill { height: 100%; width: 0%; background: linear-gradient(to right, var(--success), var(--warning), var(--danger)); transition: width 0.3s ease; }
+        .cand-log-container { display: flex; flex-direction: column; gap: 0.4rem; height: 120px; overflow-y: auto; background: rgba(0,0,0,0.4); border-radius: 6px; padding: 0.4rem; border: 1px solid var(--glass-border); }
+        .cand-log-entry { display: grid; grid-template-columns: 55px 1fr; font-family: var(--font-mono); font-size: 0.65rem; border-bottom: 1px solid rgba(255,255,255,0.05); padding-bottom: 0.1rem; }
+        .cand-log-time { color: #94a3b8; } .cand-log-txt { color: #f8fafc; } .cand-log-txt.danger { color: #fca5a5; font-weight: 600; } .cand-log-txt.warning { color: #fde047; }
+        
+        .cand-action-group { display: grid; grid-template-columns: 1fr 1fr; gap: 0.4rem; }
+        .cand-btn { padding: 0.5rem; border-radius: 6px; font-family: var(--font-main); font-size: 0.75rem; font-weight: 600; cursor: pointer; border: none; transition: all 0.2s; display: flex; align-items: center; justify-content: center; gap: 0.25rem; }
+        .btn-warning-action { background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%); color: #ffffff; }
+        .btn-danger-action { background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%); color: #ffffff; }
+        .btn-success-action { background: rgba(255, 255, 255, 0.1); color: #ffffff; border: 1px solid rgba(255, 255, 255, 0.25); grid-column: span 2; }
+        .btn-success-action:hover { background: rgba(255, 255, 255, 0.2); }
+
+        .violation-detail-layout { display: flex; gap: 1.5rem; height: 100%; align-items: stretch; }
+        .v-detail-left { flex: 1; display: flex; flex-direction: column; gap: 1.5rem; }
+        .v-detail-right { flex: 2; display: flex; flex-direction: column; }
+        
+        .v-timeline-container { flex: 1; background: rgba(0,0,0,0.2); border-radius: 8px; padding: 1rem; overflow-y: auto; display: flex; flex-direction: column; gap: 1rem; border: 1px solid var(--glass-border); }
+        .v-timeline-item { position: relative; padding-left: 1.5rem; border-left: 2px solid var(--glass-border); }
+        .v-timeline-dot { position: absolute; left: -6px; top: 0; width: 10px; height: 10px; border-radius: 50%; background: var(--accent-primary); }
+        .v-timeline-dot.critical { background: var(--danger); box-shadow: 0 0 8px var(--danger); }
+        .v-timeline-dot.warning { background: var(--warning); box-shadow: 0 0 8px var(--warning); }
+        .v-time { font-family: var(--font-mono); font-size: 0.75rem; color: var(--text-secondary); margin-bottom: 0.2rem; }
+        .v-desc { font-size: 0.9rem; }
+
+        .evidence-canvas-container { flex: 1; background: #020205; border-radius: 8px; border: 1px solid rgba(255,255,255,0.15); overflow: hidden; position: relative; min-height: 400px; display: flex; align-items: center; justify-content: center; }
+        #evidence-canvas { max-width: 100%; max-height: 100%; }
+
+        .dash-stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; margin-bottom: 0.5rem; }
+        .dash-stat-card { background: rgba(0,0,0,0.3); border: 1px solid var(--glass-border); border-radius: 12px; padding: 1rem; display: flex; flex-direction: column; justify-content: center; }
+        .dash-stat-label { font-size: 0.75rem; color: var(--text-secondary); text-transform: uppercase; font-weight: 600; margin-bottom: 0.5rem; }
+        .dash-stat-value { font-size: 1.8rem; font-weight: 700; font-family: var(--font-mono); color: #fff; }
+
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: rgba(0,0,0,0.1); }
+        ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.25); border-radius: 3px; }
+        ::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.4); }
+
+        @keyframes pulse-danger-bg {
+          0%, 100% { background-color: rgba(239, 68, 68, 0.15); }
+          50%      { background-color: rgba(239, 68, 68, 0.35); }
+        }
+
+        @keyframes pulse-danger-border {
+          0%, 100% { box-shadow: 0 0 20px rgba(239, 68, 68, 0.35); border-color: rgba(239, 68, 68, 0.7); }
+          50%      { box-shadow: 0 0 35px rgba(239, 68, 68, 0.65); border-color: rgba(239, 68, 68, 1); }
+        }
+
+        /* =========================================
+           CSS BỔ SUNG CHO CÁC MODULE MỚI (KHÔNG SỬA CODE CŨ)
+           ========================================= */
+        /* Dropdown User */
+        .user-dropdown-wrapper { position: relative; display: flex; align-items: center; cursor: pointer; }
+        .user-avatar { width: 32px; height: 32px; background: var(--accent-primary); border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: 700; color: #fff; font-size: 0.8rem; border: 2px solid var(--glass-border); }
+        .user-dropdown { position: absolute; top: 120%; right: 0; background: var(--glass-bg); border: 1px solid var(--glass-border); border-radius: 8px; width: 220px; display: none; flex-direction: column; box-shadow: 0 10px 30px rgba(0,0,0,0.5); z-index: 100; backdrop-filter: blur(16px); overflow: hidden; }
+        .user-dropdown.show { display: flex; }
+        .user-dropdown-item { padding: 0.8rem 1rem; color: var(--text-primary); text-decoration: none; font-size: 0.85rem; border-bottom: 1px solid rgba(255,255,255,0.05); transition: 0.2s; display: flex; align-items: center; gap: 0.5rem; }
+        .user-dropdown-item:hover { background: rgba(99,102,241,0.2); }
+        
+        /* Modal UI */
+        .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.6); backdrop-filter: blur(4px); z-index: 9999; display: none; align-items: center; justify-content: center; opacity: 0; transition: opacity 0.3s; }
+        .modal-overlay.show { display: flex; opacity: 1; }
+        .modal-content { background: var(--glass-bg); border: 1px solid var(--glass-border); border-radius: 16px; width: 500px; max-width: 90%; padding: 1.5rem; display: flex; flex-direction: column; gap: 1.2rem; box-shadow: 0 10px 30px rgba(0,0,0,0.5); transform: translateY(20px); transition: transform 0.3s; }
+        .modal-overlay.show .modal-content { transform: translateY(0); }
+        .modal-header { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 0.8rem; }
+        .modal-title { font-size: 1.1rem; font-weight: 700; color: #fff; }
+        .close-modal-btn { background: transparent; border: none; color: var(--text-secondary); cursor: pointer; }
+        .close-modal-btn:hover { color: var(--danger); }
+        
+        /* Forms & Layouts */
+        .form-group { display: flex; flex-direction: column; gap: 0.4rem; }
+        .form-label { font-size: 0.8rem; color: var(--text-secondary); font-weight: 500; }
+        .form-input { background: rgba(0,0,0,0.3); border: 1px solid var(--glass-border); padding: 0.6rem 1rem; border-radius: 8px; color: #fff; font-family: var(--font-main); font-size: 0.85rem; outline: none; width: 100%; transition: border 0.2s; }
+        .form-input:focus { border-color: var(--accent-primary); }
+        .grid-2-col { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+        .modal-actions { display: flex; justify-content: flex-end; gap: 0.5rem; margin-top: 0.5rem; }
+        
+        /* Placeholder Biểu đồ */
+        .chart-placeholder { background: rgba(0,0,0,0.2); border: 1px dashed var(--glass-border); border-radius: 8px; width: 100%; height: 200px; display: flex; flex-direction: column; align-items: center; justify-content: center; color: var(--text-secondary); }
+
+        /* CSS In ấn */
+        @media print {
+            body { background: #fff !important; color: #000 !important; display: block; overflow: visible; height: auto; }
+            .app-sidebar, header, .toolbar, .orb, #back-to-cctv-btn { display: none !important; }
+            .app-main-wrapper { padding: 0 !important; display: block; }
+            main { padding: 0 !important; display: block; overflow: visible; }
+            .panel-card { box-shadow: none !important; border: 1px solid #ccc !important; background: #fff !important; color: #000 !important; margin-bottom: 20px; break-inside: avoid; }
+            .text-primary, .v-desc, .panel-title { color: #000 !important; }
+            .text-secondary, .v-time { color: #555 !important; }
+            .candidate-badge { border: 1px solid #000; color: #000; }
+            .laser-scanner { display: none !important; }
+        }
+    </style>
+</head>
+<body>
+    <div class="orb orb-1"></div>
+    <div class="orb orb-2"></div>
+
+    <video id="real-webcam" autoplay playsinline style="display:none;"></video>
+    <video id="real-cctv-webcam" autoplay playsinline style="display:none;"></video>
+
+    <nav class="app-sidebar">
+        <div class="sidebar-header">
+            <div class="logo-dot" id="header-status-dot"></div>
+            <div class="sidebar-logo-text">AI-Proctor</div>
+        </div>
+        <div class="sidebar-nav">
+            <div class="sidebar-link active" data-view="cctv-overview-view" onclick="navigate('cctv-overview-view')">
+                <svg fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M10.5 6a7.5 7.5 0 1 0 7.5 7.5h-7.5V6Z" /><path stroke-linecap="round" stroke-linejoin="round" d="M13.5 10.5H21A7.5 7.5 0 0 0 13.5 3v7.5Z" /></svg>
+                Dashboard tổng quan
+            </div>
+            <div class="sidebar-link" data-view="rooms-list-view" onclick="navigate('rooms-list-view')">
+                <svg fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M8.25 21v-4.875c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125V21m0 0h4.5V3.545M12.75 21h7.5V10.75M2.25 21h1.5m18 0h-18M2.25 9l4.5-1.636M18.75 3l-1.5.545m0 6.205 3 1m1.5.5-1.5-.5M6.75 7.364V3h-3v18m3-13.636 10.5-3.819" /></svg>
+                Danh sách phòng thi
+            </div>
+            <div class="sidebar-link" data-view="room-monitor-view" onclick="navigate('room-monitor-view')">
+                <svg fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M2.036 12.322a1.012 1.012 0 0 1 0-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178Z" /><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z" /></svg>
+                Giám sát phòng thi
+            </div>
+            <div class="sidebar-link" data-view="alerts-view" onclick="navigate('alerts-view')">
+                <svg fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3Z" /></svg>
+                Bảng thông báo
+            </div>
+            <div class="sidebar-link" data-view="violation-detail-view" onclick="navigate('violation-detail-view')">
+                <svg fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 0 0-3.375-3.375h-1.5A1.125 1.125 0 0 1 13.5 7.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H8.25m3.75 9v6m3-3H9m1.5-12H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 0 0-9-9Z" /></svg>
+                Chi tiết vi phạm
+            </div>
+
+            <div style="height: 1px; background: rgba(255,255,255,0.05); margin: 0.5rem 0;"></div>
+            
+            <div class="sidebar-link" data-view="reports-stats-view" onclick="navigate('reports-stats-view')">
+                <svg fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M10.5 6a7.5 7.5 0 1 0 7.5 7.5h-7.5V6Z" /><path stroke-linecap="round" stroke-linejoin="round" d="M13.5 10.5H21A7.5 7.5 0 0 0 13.5 3v7.5Z" /></svg>
+                Báo cáo & Thống kê
+            </div>
+            <div class="sidebar-link" data-view="exam-management-view" onclick="navigate('exam-management-view')">
+                <svg fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 0 1 2.25-2.25h13.5A2.25 2.25 0 0 1 21 7.5v11.25m-18 0A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75m-18 0v-7.5A2.25 2.25 0 0 1 5.25 9h13.5A2.25 2.25 0 0 1 21 11.25v7.5" /></svg>
+                Quản lý kỳ thi
+            </div>
+            <div class="sidebar-link" data-view="candidate-management-view" onclick="navigate('candidate-management-view')">
+                <svg fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M15 19.128a9.38 9.38 0 0 0 2.625.372 9.337 9.337 0 0 0 4.121-.952 4.125 4.125 0 0 0-7.533-2.493M15 19.128v-.003c0-1.113-.285-2.16-.786-3.07M15 19.128v.106A12.318 12.318 0 0 1 8.624 21c-2.331 0-4.512-.645-6.374-1.766l-.001-.109a6.375 6.375 0 0 1 11.964-3.07M12 6.375a3.375 3.375 0 1 1-6.75 0 3.375 3.375 0 0 1 6.75 0Zm8.25 2.25a2.625 2.625 0 1 1-5.25 0 2.625 2.625 0 0 1 5.25 0Z" /></svg>
+                Quản lý thí sinh
+            </div>
+            <div class="sidebar-link" data-view="proctor-management-view" onclick="navigate('proctor-management-view')">
+                <svg fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12h3.75M9 15h3.75M9 18h3.75m3 .75H18a2.25 2.25 0 0 0 2.25-2.25V6.108c0-1.135-.845-2.098-1.976-2.192a48.424 48.424 0 0 0-1.123-.08m-5.801 0c-.065.21-.1.433-.1.664 0 .414.336.75.75.75h4.5a.75.75 0 0 0 .75-.75 2.25 2.25 0 0 0-.1-.664m-5.8 0A2.251 2.251 0 0 1 13.5 2.25H15c1.012 0 1.867.668 2.15 1.586m-5.8 0c-.376.023-.75.05-1.124.08C9.095 4.01 8.25 4.973 8.25 6.108V8.25m0 0H4.875c-.621 0-1.125.504-1.125 1.125v11.25c0 .621.504 1.125 1.125 1.125h9.75c.621 0 1.125-.504 1.125-1.125V9.375c0-.621-.504-1.125-1.125-1.125H8.25ZM6.75 12h.008v.008H6.75V12Zm0 3h.008v.008H6.75V15Zm0 3h.008v.008H6.75V18Z" /></svg>
+                Quản lý giám thị
+            </div>
+            <div class="sidebar-link" data-view="ai-config-view" onclick="navigate('ai-config-view')">
+                <svg fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.325.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 0 1 1.37.49l1.296 2.247a1.125 1.125 0 0 1-.26 1.431l-1.003.827c-.293.241-.438.613-.43.992a7.723 7.723 0 0 1 0 .255c-.008.378.137.75.43.99l1.005.828c.424.35.534.954.26 1.43l-1.298 2.247a1.125 1.125 0 0 1-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.57 6.57 0 0 1-.22.128c-.331.183-.581.495-.644.869l-.213 1.28c-.09.543-.56.941-1.11.941h-2.594c-.55 0-1.02-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 0 1-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 0 1-1.369-.49l-1.297-2.247a1.125 1.125 0 0 1 .26-1.431l1.004-.827c.292-.24.437-.613.43-.991a6.932 6.932 0 0 1 0-.255c.007-.38-.138-.751-.43-.992l-1.004-.827a1.125 1.125 0 0 1-.26-1.43l1.297-2.247a1.125 1.125 0 0 1 1.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.086.22-.128.332-.183.582-.495.644-.869l.214-1.281Z" /><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z" /></svg>
+                Cấu hình AI
+            </div>
+            <div class="sidebar-link" data-view="system-logs-view" onclick="navigate('system-logs-view')">
+                <svg fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M3.75 12h16.5m-16.5 3.75h16.5M3.75 19.5h16.5M5.625 4.5h12.75a1.875 1.875 0 0 1 0 3.75H5.625a1.875 1.875 0 0 1 0-3.75Z" /></svg>
+                Nhật ký hệ thống
+            </div>
+        </div>
+    </nav>
+
+    <div class="app-main-wrapper">
+        <header>
+            <div class="header-logo" style="gap:0;">
+                <button id="back-to-cctv-btn" class="back-btn" style="display: none; margin-right: 1rem;" onclick="navigate('cctv-overview-view')">
+                    <svg width="14" height="14" fill="currentColor" viewBox="0 0 24 24" style="margin-right: 0.25rem;"><path d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z"/></svg>
+                    Quay lại
+                </button>
+                <h1 id="header-title" style="font-size: 1.1rem; color: #fff; background: none; -webkit-text-fill-color: initial;">Dashboard Tổng Quan</h1>
+                
+                <div id="header-search-bar" style="display: flex; align-items: center; background: rgba(255,255,255,0.05); padding: 0.35rem 0.75rem; border-radius: 8px; border: 1px solid var(--glass-border); margin-left: 1rem; position: relative;">
+                    <svg onclick="document.getElementById('room-search-input').focus()" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" style="margin-right: 0.5rem; color: var(--text-secondary); cursor: pointer;">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-4.35-4.35M19 10.5a8.5 8.5 0 11-17 0 8.5 8.5 0 0117 0z"></path>
+                    </svg>
+                    <input type="text" id="room-search-input" placeholder="Tìm phòng, thí sinh..." style="background: transparent; border: none; color: #fff; font-family: var(--font-main); font-size: 0.8rem; outline: none; width: 130px;" oninput="handleSearchInput(this.value)" autocomplete="off">
+                    
+                    <div id="search-suggestions" style="display: none; position: absolute; top: 120%; left: 0; width: 280px; background: rgba(10, 8, 22, 0.95); border: 1px solid var(--glass-border); border-radius: 8px; z-index: 100; max-height: 250px; overflow-y: auto; box-shadow: 0 10px 30px rgba(0,0,0,0.5); backdrop-filter: blur(16px);">
+                    </div>
+                </div>
+
+                <span id="room-badge" style="display: none; font-size: 0.7rem; background: rgba(99, 102, 241, 0.2); border: 1px solid var(--accent-primary); padding: 0.15rem 0.5rem; border-radius: 9999px; color: #a5b4fc; font-weight: 600; margin-left: 0.5rem;">B202</span>
+            </div>
+            
+            <div style="display: flex; align-items: center; gap: 1rem;">
+                <div id="camera-selection-panel" style="display: flex; align-items: center; gap: 0.75rem; background: rgba(255,255,255,0.03); padding: 0.35rem 0.75rem; border-radius: 10px; border: 1px solid var(--glass-border);">
+                    <div style="display:flex; flex-direction:column; gap:0.15rem;">
+                        <span style="font-size:0.55rem; color:var(--text-secondary); text-transform:uppercase; font-weight:600; letter-spacing:0.02em;">Cam Thí sinh</span>
+                        <select id="user-camera-select" style="width: 140px; background: rgba(0,0,0,0.4); border: 1px solid var(--glass-border); color: #fff; padding: 0.15rem 0.35rem; font-size: 0.72rem; border-radius: 4px; outline: none; cursor: pointer;"></select>
+                    </div>
+                    <div style="display:flex; flex-direction:column; gap:0.15rem;">
+                        <span style="font-size:0.55rem; color:var(--text-secondary); text-transform:uppercase; font-weight:600; letter-spacing:0.02em;">Cam Tổng (CCTV)</span>
+                        <select id="cctv-camera-select" style="width: 140px; background: rgba(0,0,0,0.4); border: 1px solid var(--glass-border); color: #fff; padding: 0.15rem 0.35rem; font-size: 0.72rem; border-radius: 4px; outline: none; cursor: pointer;"></select>
+                    </div>
+                </div>
+                
+                <div class="system-stats-bar">
+                    <div class="stat-item">
+                        <span class="stat-label">Tổng Phòng</span>
+                        <span class="stat-val" id="global-total-rooms" style="color: white;">10</span>
+                    </div>
+                    <div class="stat-item">
+                        <span class="stat-label">An Toàn</span>
+                        <span class="stat-val safe" id="global-safe-rooms">0</span>
+                    </div>
+                    <div class="stat-item">
+                        <span class="stat-label">Nghi Ngờ</span>
+                        <span class="stat-val suspect" id="global-warning-rooms">0</span>
+                    </div>
+                    <div class="stat-item">
+                        <span class="stat-label">Cảnh Báo</span>
+                        <span class="stat-val violating" id="global-danger-rooms">0</span>
+                    </div>
+                    
+                    <button id="global-session-btn" style="background: linear-gradient(135deg, #10b981 0%, #059669 100%); color: #fff; font-family: var(--font-main); font-size: 0.8rem; font-weight: 700; padding: 0.4rem 1rem; border-radius: 8px; border: none; cursor: pointer; display: flex; align-items: center; gap: 0.4rem; transition: all 0.3s; box-shadow: 0 0 10px rgba(16, 185, 129, 0.2); margin-right: 0.5rem;" onclick="toggleGlobalSession()">
+                        <span id="global-session-dot" style="width: 8px; height: 8px; border-radius: 50%; background: #fff; display: inline-block;"></span>
+                        <span id="global-session-text">Bắt đầu phiên thi</span>
+                    </button>
+
+                    <div class="time-badge" id="live-clock">12:00:00</div>
+
+                    <div style="width: 1px; height: 30px; background: rgba(255,255,255,0.1); margin: 0 0.5rem;"></div>
+                    <div class="user-dropdown-wrapper" onclick="if (event.target.closest('.user-avatar')) toggleDropdown('userDropdown')">
+                        <div class="user-avatar">AD</div>
+                        <div class="user-dropdown" id="userDropdown">
+                            <div style="padding: 1rem; border-bottom: 1px solid rgba(255,255,255,0.05);">
+                                <div style="font-weight: 600; color: #fff;">Admin Proctor</div>
+                                <div style="font-size: 0.75rem; color: var(--text-secondary);">admin@uit.edu.vn</div>
+                            </div>
+                            <a href="#" class="user-dropdown-item" onclick="toggleDropdown('userDropdown'); openModal('profileModal')"><svg width="14" height="14" fill="currentColor" viewBox="0 0 24 24"><path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/></svg> Hồ sơ cá nhân</a>
+                            <a href="#" class="user-dropdown-item" onclick="toggleDropdown('userDropdown'); openModal('changePasswordModal')"><svg width="14" height="14" fill="currentColor" viewBox="0 0 24 24"><path d="M18 8h-1V6c0-2.76-2.24-5-5-5S7 3.24 7 6v2H6c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V10c0-1.1-.9-2-2-2zm-6 9c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2zm3.1-9H8.9V6c0-1.71 1.39-3.1 3.1-3.1 1.71 0 3.1 1.39 3.1 3.1v2z"/></svg> Đổi mật khẩu</a>
+                            <a href="#" class="user-dropdown-item" onclick="toggleDropdown('userDropdown'); navigate('settings-view')"><svg width="14" height="14" fill="currentColor" viewBox="0 0 24 24"><path d="M19.43 12.98c.04-.32.07-.64.07-.98s-.03-.66-.07-.98l2.11-1.65c.19-.15.24-.42.12-.64l-2-3.46c-.12-.22-.39-.3-.61-.22l-2.49 1c-.52-.4-1.08-.73-1.69-.98l-.38-2.65C14.46 2.18 14.25 2 14 2h-4c-.25 0-.46.18-.49.42l-.38 2.65c-.61.25-1.17.59-1.69.98l-2.49-1c-.23-.09-.49 0-.61.22l-2 3.46c-.13.22-.07.49-.12-.64l2.11 1.65c-.04.32-.07.65-.07.98s.03.66.07.98l-2.11 1.65c-.19.15-.24.42-.12.64l2 3.46c.12.22.39.3.61.22l2.49-1c.52.4 1.08.73 1.69.98l.38 2.65c.03.24.24.42.49.42h4c.25 0 .46-.18.49-.42l.38-2.65c.61-.25 1.17-.59 1.69-.98l2.49 1c.23.09.49 0 .61-.22l2-3.46c.12-.22.07-.49-.12-.64l-2.11-1.65zM12 15.5c-1.93 0-3.5-1.57-3.5-3.5s1.57-3.5 3.5-3.5 3.5 1.57 3.5 3.5-1.57 3.5-3.5 3.5z"/></svg> Cài đặt</a>
+                            <a href="#" class="user-dropdown-item" onclick="toggleDropdown('userDropdown'); navigate('help-view')"><svg width="14" height="14" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 17h-2v-2h2v2zm2.07-7.75l-.9.92C13.45 12.9 13 13.5 13 15h-2v-.5c0-1.1.45-2.1 1.17-2.83l1.24-1.26c.37-.36.59-.86.59-1.41 0-1.1-.9-2-2-2s-2 .9-2 2H8c0-2.21 1.79-4 4-4s4 1.79 4 4c0 .88-.36 1.68-.93 2.25z"/></svg> Trợ giúp</a>
+                            <a href="#" class="user-dropdown-item" style="color: var(--danger);" onclick="toggleDropdown('userDropdown'); confirmLogout(event);"><svg width="14" height="14" fill="currentColor" viewBox="0 0 24 24"><path d="M17 7l-1.41 1.41L18.17 11H8v2h10.17l-2.58 2.58L17 17l5-5zM4 5h8V3H4c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h8v-2H4V5z"/></svg> Đăng xuất</a>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </header>
+
+        <main>
+            <div class="views-container">
+                
+                <div id="cctv-overview-view" class="view-section active-view">
+                    <div class="dash-stats-grid">
+                        <div class="dash-stat-card">
+                            <span class="dash-stat-label">Tổng sự kiện vi phạm hôm nay</span>
+                            <span class="dash-stat-value" id="dash-total-alerts">0</span>
+                        </div>
+                        <div class="dash-stat-card">
+                            <span class="dash-stat-label">Tỉ lệ phòng thi an toàn</span>
+                            <span class="dash-stat-value" id="dash-safe-rate" style="color: var(--success);">100%</span>
+                        </div>
+                        <div class="dash-stat-card">
+                            <span class="dash-stat-label">Thí sinh đang theo dõi đặc biệt</span>
+                            <span class="dash-stat-value" id="dash-tracked-cands" style="color: var(--warning);">0</span>
+                        </div>
+                    </div>
+
+                    <div class="panel-card">
+                        <div class="panel-title" style="flex-direction: column; align-items: flex-start; gap: 0.4rem;">
+                            HỆ THỐNG CAMERA CCTV TOÀN CẢNH CÁC PHÒNG ĐANG THI
+                            <span style="font-size: 0.75rem; color: var(--text-secondary); font-weight: 400;">Click vào phòng thi để giám sát camera máy tính từng thí sinh</span>
+                        </div>
+                        <div class="cctv-grid" id="cctv-grid-container"></div>
+                    </div>
+                </div>
+
+                <div id="rooms-list-view" class="view-section">
+                    <div class="toolbar" style="width: 100%;">
+                        <div style="display: flex; align-items: center; background: rgba(0,0,0,0.3); padding: 0.6rem 1rem; border-radius: 8px; border: 1px solid var(--glass-border); width: 300px;">
+                            <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" style="margin-right: 0.5rem; color: var(--text-secondary);">
+                                <path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-4.35-4.35M19 10.5a8.5 8.5 0 11-17 0 8.5 8.5 0 0117 0z"></path>
+                            </svg>
+                            <input type="text" id="room-list-search" placeholder="Tìm kiếm mã phòng thi (vd: A101)..." style="background: transparent; border: none; color: #fff; font-family: var(--font-main); outline: none; width: 100%;" oninput="renderRoomListTable()">
+                        </div>
+                        
+                        <div style="display:flex; gap:1rem;">
+                            <select id="room-list-filter" class="search-box" style="width: 200px; padding: 0.6rem; border-radius: 8px;" onchange="renderRoomListTable()">
+                                <option value="all">Tất cả trạng thái</option>
+                                <option value="đang thi">Đang thi</option>
+                                <option value="chưa thi">Chưa thi</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="alerts-table-container" style="flex: 1; overflow-y: auto;">
+                        <table class="alerts-table">
+                            <thead>
+                                <tr>
+                                    <th style="text-align: left;">Phòng</th>
+                                    <th style="text-align: left;">Tên môn thi</th>
+                                    <th style="text-align: center;">Số lượng thí sinh</th>
+                                    <th style="text-align: center;">Tình trạng</th>
+                                    <th style="text-align: center;">Thao tác</th>
+                                </tr>
+                            </thead>
+                            <tbody id="rooms-table-body">
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <div id="room-monitor-view" class="view-section">
+                    <div class="room-monitor-workspace">
+                        <div class="class-cctv-container">
+                            <canvas id="class-cctv-canvas"></canvas>
+                            <div class="feed-label-tag" id="class-cctv-label">CAMERA TỔNG: B202</div>
+                            <div class="laser-scanner color-blue" style="animation-duration: 4.5s;"></div>
+                        </div>
+                        <div class="panel-card" style="padding: 1.25rem;">
+                            <div class="panel-title" style="margin-bottom: 1rem; padding-bottom: 0.75rem;">
+                                CAMERA TRỰC DIỆN (WEBCAM) TỪNG THÍ SINH
+                            </div>
+                            <div class="candidates-grid" id="candidates-grid-container"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <div id="alerts-view" class="view-section">
+                    <div class="toolbar" style="width: 100%; justify-content: space-between;">
+                        <div id="alerts-search-bar" style="display: flex; align-items: center; background: rgba(0,0,0,0.3); padding: 0.6rem 1rem; border-radius: 8px; border: 1px solid var(--glass-border); width: 300px; position: relative;">
+                            <svg onclick="document.getElementById('alerts-search-input').focus()" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" style="margin-right: 0.5rem; color: var(--text-secondary); cursor: pointer;">
+                                <path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-4.35-4.35M19 10.5a8.5 8.5 0 11-17 0 8.5 8.5 0 0117 0z"></path>
+                            </svg>
+                            <input type="text" id="alerts-search-input" placeholder="Tìm kiếm phòng, thí sinh..." style="background: transparent; border: none; color: #fff; font-family: var(--font-main); outline: none; width: 100%;" oninput="handleAlertsSearchInput(this.value)" autocomplete="off">
+                            
+                            <div id="alerts-search-suggestions" style="display: none; position: absolute; top: 120%; left: 0; width: 300px; background: rgba(10, 8, 22, 0.95); border: 1px solid var(--glass-border); border-radius: 8px; z-index: 100; max-height: 250px; overflow-y: auto; box-shadow: 0 10px 30px rgba(0,0,0,0.5); backdrop-filter: blur(16px);">
+                            </div>
+                        </div>
+
+                        <div style="display:flex; gap:1rem;">
+                            <select id="alerts-list-filter" class="search-box" style="width: 250px; padding: 0.6rem; border-radius: 8px;" onchange="renderAlertsTable()">
+                                <option value="all">Tất cả thông báo</option>
+                                <option value="info">An toàn (Info)</option>
+                                <option value="warning">Nghi ngờ (Warning)</option>
+                                <option value="critical">Cảnh báo (Critical)</option>
+                            </select>
+                            <button class="filter-btn" onclick="exportCSV()">Xuất báo cáo CSV</button>
+                        </div>
+                    </div>
+                    <div class="alerts-table-container" style="flex: 1; overflow-y: auto;">
+                        <table class="alerts-table">
+                            <thead>
+                                <tr>
+                                    <th style="text-align: left;">Thời gian</th>
+                                    <th style="text-align: left;">Phòng thi</th>
+                                    <th style="text-align: left;">Thí sinh</th>
+                                    <th style="text-align: left;">Hành vi phát hiện</th>
+                                    <th style="text-align: center;">Mức độ</th>
+                                    <th style="text-align: center;">Thao tác</th>
+                                </tr>
+                            </thead>
+                            <tbody id="alerts-table-body">
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <div id="violation-detail-view" class="view-section">
+                    <div class="toolbar">
+                        <h2 style="font-size: 1.2rem;" id="viol-header-title">Hồ sơ vi phạm</h2>
+                        <button class="filter-btn" onclick="printReport()">
+                            <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" style="margin-right: 0.3rem;"><path d="M6 9V2h12v7M6 18H4a2 2 0 01-2-2v-5a2 2 0 012-2h16a2 2 0 012 2v5a2 2 0 01-2 2h-2M6 14h12v8H6v-8z"></path></svg>
+                            In Biên Bản
+                        </button>
+                    </div>
+                    <div class="violation-detail-layout">
+                        <div class="v-detail-left">
+                            <div class="panel-card" id="viol-info">
+                                <div class="panel-title" style="margin-bottom: 0;">THÔNG TIN THÍ SINH</div>
+                                <div style="margin-top: 1rem; display: flex; flex-direction: column; gap: 0.8rem;">
+                                    <div style="display: flex; justify-content: space-between;"><span class="text-secondary">Phòng Thi:</span> <strong id="viol-room" class="text-primary">--</strong></div>
+                                    <div style="display: flex; justify-content: space-between;"><span class="text-secondary">Mã Số:</span> <strong id="viol-cand-id" class="text-primary">--</strong></div>
+                                    <div style="display: flex; justify-content: space-between;"><span class="text-secondary">Họ và Tên:</span> <strong id="viol-cand-name" class="text-primary">--</strong></div>
+                                    <div style="display: flex; justify-content: space-between;"><span class="text-secondary">Trạng thái:</span> <span id="viol-cand-status" class="candidate-badge badge-safe">--</span></div>
+                                </div>
+                            </div>
+                            
+                            <div class="panel-card" style="flex: 1; display: flex; flex-direction: column;">
+                                <div class="panel-title" style="margin-bottom: 0.5rem;">TIMELINE LOG SỰ KIỆN</div>
+                                <div class="v-timeline-container" id="viol-timeline">
+                                    </div>
+                            </div>
+                        </div>
+
+                        <div class="v-detail-right panel-card">
+                            <div class="panel-title">BẰNG CHỨNG HÌNH ẢNH (AI SNAPSHOT)</div>
+                            <div class="evidence-canvas-container">
+                                <div class="feed-label-tag" id="viol-evidence-tag">CHỜ DỮ LIỆU...</div>
+                                <canvas id="evidence-canvas"></canvas>
+                            </div>
+                            <div style="margin-top: 1rem; font-size: 0.9rem; line-height: 1.5; color: var(--text-secondary);">
+                                <strong>Mô tả vi phạm mới nhất: </strong><br>
+                                <span id="viol-desc-text" style="color: var(--text-primary);">--</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div id="reports-stats-view" class="view-section">
+                    <div class="dash-stats-grid" style="grid-template-columns: repeat(5, 1fr);">
+                        <div class="dash-stat-card"><span class="dash-stat-label">Tổng phòng thi</span><span class="dash-stat-value">25</span></div>
+                        <div class="dash-stat-card"><span class="dash-stat-label">Tổng thí sinh</span><span class="dash-stat-value">1,250</span></div>
+                        <div class="dash-stat-card"><span class="dash-stat-label">Tổng cảnh báo</span><span class="dash-stat-value" style="color: var(--warning);">142</span></div>
+                        <div class="dash-stat-card"><span class="dash-stat-label">Tổng vi phạm</span><span class="dash-stat-value" style="color: var(--danger);">18</span></div>
+                        <div class="dash-stat-card"><span class="dash-stat-label">Tỷ lệ vi phạm</span><span class="dash-stat-value">1.4%</span></div>
+                    </div>
+                    
+                    <div class="grid-2-col">
+                        <div class="panel-card">
+                            <div class="panel-title">Biểu đồ vi phạm theo thời gian</div>
+                            <div class="chart-placeholder">
+                                <svg width="40" height="40" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24" style="opacity:0.5; margin-bottom: 0.5rem;"><path stroke-linecap="round" stroke-linejoin="round" d="M3 13.125C3 12.504 3.504 12 4.125 12h2.25c.621 0 1.125.504 1.125 1.125v6.75C7.5 20.496 6.996 21 6.375 21h-2.25A1.125 1.125 0 0 1 3 19.875v-6.75ZM9.75 8.625c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125v11.25c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 0 1-1.125-1.125V8.625ZM16.5 4.125c0-.621.504-1.125 1.125-1.125h2.25C20.496 3 21 3.504 21 4.125v15.75c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 0 1-1.125-1.125V4.125Z" /></svg>
+                                Placeholder: Bar Chart
+                            </div>
+                        </div>
+                        <div class="panel-card">
+                            <div class="panel-title">Các loại hành vi vi phạm</div>
+                            <div class="chart-placeholder">
+                                <svg width="40" height="40" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24" style="opacity:0.5; margin-bottom: 0.5rem;"><path stroke-linecap="round" stroke-linejoin="round" d="M10.5 6a7.5 7.5 0 1 0 7.5 7.5h-7.5V6Z" /><path stroke-linecap="round" stroke-linejoin="round" d="M13.5 10.5H21A7.5 7.5 0 0 0 13.5 3v7.5Z" /></svg>
+                                Placeholder: Pie Chart
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="toolbar" style="margin-top: 1rem;">
+                        <span style="font-weight: 600;">Dữ liệu thống kê phòng thi</span>
+                        <div style="display: flex; gap: 0.5rem;">
+                            <button class="filter-btn" onclick="showToast('Đang tải dữ liệu PDF...')">Xuất PDF</button>
+                            <button class="filter-btn" onclick="showToast('Đang tải dữ liệu Excel...')">Xuất Excel</button>
+                            <button class="filter-btn" style="background: rgba(255,255,255,0.1); border-color: rgba(255,255,255,0.3); color: #fff;" onclick="printReport()">In báo cáo</button>
+                            <button class="filter-btn" style="background: transparent; border-color: transparent;" onclick="renderReportsTable(); showToast('Đã làm mới dữ liệu.')">Làm mới</button>
+                        </div>
+                    </div>
+                    <div class="alerts-table-container">
+                        <table class="alerts-table">
+                            <thead><tr><th>Phòng thi</th><th style="text-align:center;">Số cảnh báo</th><th style="text-align:center;">Số vi phạm</th><th style="text-align:center;">Tỷ lệ vi phạm</th><th style="text-align:center;">Trạng thái</th></tr></thead>
+                            <tbody id="reports-table-body"></tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <div id="settings-view" class="view-section">
+                    <div class="toolbar">
+                        <h2 style="font-size: 1.2rem;">Cài đặt hệ thống</h2>
+                        <button class="filter-btn" onclick="navigate('cctv-overview-view')">Quay lại Dashboard</button>
+                    </div>
+                    <div class="grid-2-col">
+                        <div class="panel-card">
+                            <div class="panel-title">Cấu hình chung</div>
+                            <div class="form-group"><label class="form-label">Tên hệ thống</label><input type="text" class="form-input" value="AI-Proctor Admin"></div>
+                            <div class="form-group"><label class="form-label">Múi giờ</label><input type="text" class="form-input" value="Asia/Ho_Chi_Minh"></div>
+                            <div class="form-group"><label class="form-label">Ngôn ngữ</label><input type="text" class="form-input" value="Tiếng Việt"></div>
+                            <div class="form-group"><label class="form-label">Email hỗ trợ</label><input type="email" class="form-input" value="support@uit.edu.vn"></div>
+                        </div>
+                        <div class="panel-card">
+                            <div class="panel-title">Chính sách an ninh</div>
+                            <div style="display:flex; flex-direction:column; gap:1rem;">
+                                <div class="form-group"><label class="form-label">Tự động chụp ảnh</label><select class="form-input" style="padding:0.75rem;"><option>On</option><option>Off</option></select></div>
+                                <div class="form-group"><label class="form-label">Ngưỡng cảnh báo (%)</label><input type="number" class="form-input" value="60"></div>
+                                <div class="form-group"><label class="form-label">Kiểm tra webcam</label><select class="form-input" style="padding:0.75rem;"><option>Buộc bật</option><option>Tùy chọn</option></select></div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="modal-actions" style="justify-content: flex-end;">
+                        <button class="filter-btn" style="background: transparent; border: none;" onclick="navigate('cctv-overview-view'); showToast('Đã lưu cài đặt tạm thời');">Lưu cấu hình</button>
+                    </div>
+                </div>
+
+                <div id="help-view" class="view-section">
+                    <div class="toolbar">
+                        <h2 style="font-size: 1.2rem;">Trung tâm trợ giúp</h2>
+                        <button class="filter-btn" onclick="navigate('cctv-overview-view')">Quay lại Dashboard</button>
+                    </div>
+                    <div class="panel-card">
+                        <div class="panel-title">Hướng dẫn nhanh</div>
+                        <div style="display:flex; flex-direction:column; gap:1rem;">
+                            <div><strong>Đổi mật khẩu</strong><p style="margin-top:0.25rem; color: var(--text-secondary);">Nhấn vào avatar ở góc phải, chọn Đổi mật khẩu và nhập đầy đủ thông tin.</p></div>
+                            <div><strong>Cài đặt hệ thống</strong><p style="margin-top:0.25rem; color: var(--text-secondary);">Tại trang Cài đặt bạn có thể điều chỉnh cấu hình chung, email hỗ trợ và ngưỡng cảnh báo.</p></div>
+                            <div><strong>Giám sát phòng thi</strong><p style="margin-top:0.25rem; color: var(--text-secondary);">Chọn phòng thi trong Dashboard hoặc danh sách phòng để bắt đầu giám sát.</p></div>
+                        </div>
+                    </div>
+                    <div class="panel-card">
+                        <div class="panel-title">Liên hệ hỗ trợ</div>
+                        <div style="display:flex; flex-direction:column; gap:0.75rem; color: var(--text-secondary);">
+                            <div>Email: <strong style="color:#fff;">support@uit.edu.vn</strong></div>
+                            <div>Điện thoại: <strong style="color:#fff;">090 123 4567</strong></div>
+                            <div>Thời gian hỗ trợ: <strong style="color:#fff;">8:00 - 17:00, Thứ 2 đến Thứ 6</strong></div>
+                        </div>
+                    </div>
+                </div>
+
+                <div id="exam-management-view" class="view-section">
+                    <div class="toolbar">
+                        <div style="display: flex; gap: 1rem; width: 60%;">
+                            <input type="text" class="search-box" placeholder="Tìm tên kỳ thi..." style="width: 50%;">
+                            <input type="date" class="search-box" style="width: 30%;">
+                            <select class="search-box" style="width: 20%;"><option>Tất cả trạng thái</option></select>
+                        </div>
+                        <button class="cam-trigger-btn" onclick="openModal('examModal')">Tạo kỳ thi mới</button>
+                    </div>
+                    <div class="alerts-table-container" style="flex: 1; overflow-y: auto;">
+                        <table class="alerts-table">
+                            <thead><tr><th>Mã KT</th><th>Tên kỳ thi</th><th>Môn thi</th><th>Ngày thi</th><th>Ca thi</th><th style="text-align:center;">Thời lượng</th><th style="text-align:center;">Phòng</th><th style="text-align:center;">Trạng thái</th><th style="text-align:center;">Thao tác</th></tr></thead>
+                            <tbody id="exam-table-body"></tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <div id="candidate-management-view" class="view-section">
+                    <div class="toolbar">
+                        <div style="display: flex; gap: 1rem; width: 60%;">
+                            <input type="text" class="search-box" placeholder="Tìm MSSV, Họ tên..." style="width: 40%;">
+                            <input type="text" class="search-box" placeholder="Lớp..." style="width: 30%;">
+                            <input type="text" class="search-box" placeholder="Phòng thi..." style="width: 30%;">
+                        </div>
+                        <div style="display: flex; gap: 0.5rem;">
+                            <button class="filter-btn import-btn" onclick="showToast('Đang mở Upload File (Excel)...')">Import Excel</button>
+                            <button class="filter-btn import-btn" onclick="showToast('Đang tải danh sách (Excel)...')">Export Excel</button>
+                            <button class="cam-trigger-btn" onclick="openModal('candidateModal')">Thêm thí sinh</button>
+                        </div>
+                    </div>
+                    <div class="alerts-table-container" style="flex: 1; overflow-y: auto;">
+                        <table class="alerts-table">
+                            <thead><tr><th>MSSV</th><th>Họ tên</th><th>Lớp</th><th>Phòng thi</th><th style="text-align:center;">Trạng thái</th><th style="text-align:center;">Cảnh báo</th><th style="text-align:center;">Vi phạm</th><th style="text-align:center;">Thao tác</th></tr></thead>
+                            <tbody id="candidate-table-body"></tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <div id="proctor-management-view" class="view-section">
+                    <div class="dash-stats-grid" style="grid-template-columns: repeat(4, 1fr);">
+                        <div class="dash-stat-card"><span class="dash-stat-label">Tổng giám thị</span><span class="dash-stat-value">45</span></div>
+                        <div class="dash-stat-card"><span class="dash-stat-label">Đang trực</span><span class="dash-stat-value" style="color: var(--success);">12</span></div>
+                        <div class="dash-stat-card"><span class="dash-stat-label">Ngoại tuyến</span><span class="dash-stat-value" style="color: var(--text-secondary);">33</span></div>
+                        <div class="dash-stat-card"><span class="dash-stat-label">Đang giám sát</span><span class="dash-stat-value" style="color: var(--accent-primary);">10</span></div>
+                    </div>
+                    <div class="toolbar" style="margin-top: 1rem;">
+                        <input type="text" class="search-box" placeholder="Tìm mã GT, Họ tên...">
+                        <button class="cam-trigger-btn" onclick="openModal('proctorModal')">Thêm giám thị</button>
+                    </div>
+                    <div class="alerts-table-container" style="flex: 1; overflow-y: auto;">
+                        <table class="alerts-table">
+                            <thead><tr><th>Mã GT</th><th>Họ tên</th><th>SĐT</th><th>Phòng phụ trách</th><th>Ca trực</th><th style="text-align:center;">Trạng thái</th><th style="text-align:center;">Thao tác</th></tr></thead>
+                            <tbody id="proctor-table-body"></tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <div id="ai-config-view" class="view-section">
+                    <div class="toolbar">
+                        <h2 style="font-size: 1.1rem; font-weight: 600;">Thông số mô hình nhận diện hành vi (YOLOv8 & GazeTracking)</h2>
+                        <div style="display: flex; gap: 0.5rem;">
+                            <button class="filter-btn" style="background: transparent; border-color: rgba(255,255,255,0.2);" onclick="restoreDefaultAiConfig()">Khôi phục mặc định</button>
+                            <button class="filter-btn" onclick="showToast('Đang chạy kịch bản Kiểm thử AI...')">Kiểm thử AI</button>
+                            <button class="cam-trigger-btn" onclick="showToast('Đã lưu cấu hình AI thành công!')">Lưu cấu hình</button>
+                        </div>
+                    </div>
+                    
+                    <div style="max-width: 680px; margin: 1.5rem auto; width: 100%;">
+                        <div class="panel-card" style="padding: 2rem; border-radius: 16px; background: rgba(15, 12, 38, 0.6); border-color: rgba(99, 102, 241, 0.25);">
+                            <div class="panel-title" style="font-size: 1.15rem; font-weight: 700; margin-bottom: 1.5rem; text-shadow: 0 0 10px rgba(99,102,241,0.5); color: #fff;">
+                                CẤU HÌNH THÔNG SỐ AI & NHẬN DIỆN KHUÔN MẶT
+                            </div>
+                            
+                            <div class="form-group" style="margin-bottom: 1.25rem;">
+                                <label class="form-label" style="font-size: 0.82rem; font-weight: 600;">Độ Nhạy Mô Hình (YOLOv8 CONF Threshold)</label>
+                                <input type="range" id="ai-conf-threshold" min="10" max="100" value="35" class="form-input" style="padding: 0; height: 5px; cursor: pointer;" oninput="updateAiConfig()">
+                                <div id="ai-conf-threshold-lbl" style="text-align: right; font-size: 0.8rem; color: var(--accent-primary); font-weight: 600;">35%</div>
+                            </div>
+                            
+                            <div class="form-group" style="margin-bottom: 1.25rem;">
+                                <label class="form-label" style="font-size: 0.82rem; font-weight: 600;">Thời Gian Mất Khuôn Mặt Tối Đa (giây)</label>
+                                <input type="number" id="ai-max-disappeared" class="form-input" value="3" style="background: rgba(0,0,0,0.3); border: 1px solid var(--glass-border); color: #fff; border-radius: 6px;" oninput="updateAiConfig()">
+                            </div>
+                            
+                            <div class="form-group" style="margin-bottom: 1.25rem;">
+                                <label class="form-label" style="font-size: 0.82rem; font-weight: 600;">Thời Gian Nhìn Lệch / Quay Đầu Liên Tục (giây)</label>
+                                <input type="number" id="ai-look-away-time" class="form-input" value="3" style="background: rgba(0,0,0,0.3); border: 1px solid var(--glass-border); color: #fff; border-radius: 6px;" oninput="updateAiConfig()">
+                            </div>
+                            
+                            <div class="form-group" style="margin-bottom: 1.25rem;">
+                                <label class="form-label" style="font-size: 0.82rem; font-weight: 600;">Ngưỡng Nhìn Lệch (Gaze Ratio)</label>
+                                <input type="range" id="ai-gaze-ratio" min="50" max="100" value="85" class="form-input" style="padding: 0; height: 5px; cursor: pointer;" oninput="updateAiConfig()">
+                                <div id="ai-gaze-ratio-lbl" style="text-align: right; font-size: 0.8rem; color: var(--accent-primary); font-weight: 600;">85%</div>
+                            </div>
+                            
+                            <div class="form-group" style="margin-bottom: 0.5rem;">
+                                <label class="form-label" style="font-size: 0.82rem; font-weight: 600;">Ngưỡng Nhận Diện Khuôn Mặt (Confidence)</label>
+                                <input type="range" id="ai-face-conf" min="10" max="100" value="70" class="form-input" style="padding: 0; height: 5px; cursor: pointer;" oninput="updateAiConfig()">
+                                <div id="ai-face-conf-lbl" style="text-align: right; font-size: 0.8rem; color: var(--accent-primary); font-weight: 600;">70%</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div id="system-logs-view" class="view-section">
+                    <div class="toolbar">
+                        <div style="display: flex; gap: 1rem; width: 70%;">
+                            <input type="date" class="search-box" style="width: 30%;">
+                            <select class="search-box" style="width: 35%;"><option>Tất cả người dùng</option><option>Admin</option><option>Hệ thống AI</option></select>
+                            <select class="search-box" style="width: 35%;"><option>Tất cả hành động</option><option>Đăng nhập</option><option>Đình chỉ</option><option>Thay đổi cấu hình</option></select>
+                        </div>
+                        <div style="display: flex; gap: 0.5rem;">
+                            <button class="filter-btn" onclick="showToast('Đang tải System Logs...')">Xuất Log</button>
+                            <button class="filter-btn" style="background: transparent; border-color: transparent;" onclick="renderLogsTable(); showToast('Đã làm mới Log!')">Làm mới</button>
+                        </div>
+                    </div>
+                    <div class="alerts-table-container" style="flex: 1; overflow-y: auto;">
+                        <table class="alerts-table">
+                            <thead><tr><th>Thời gian</th><th>Người thực hiện</th><th>Hành động</th><th>Đối tượng</th><th style="text-align:center;">Kết quả</th><th style="text-align:right;">IP Address</th></tr></thead>
+                            <tbody id="logs-table-body"></tbody>
+                        </table>
+                    </div>
+            
+                    
+                </div>
+            </div>
+
+            <div class="global-right-sidebar">
+                <div class="panel-card alerts-panel">
+                    <div class="panel-title" style="margin-bottom: 0.5rem;">
+                        BẢNG THÔNG BÁO
+                        <span id="alert-count" style="text-decoration: underline; cursor: pointer; transition: color 0.2s; color: var(--accent-primary);" onmouseover="this.style.color='#818cf8'" onmouseout="this.style.color='var(--accent-primary)'" onclick="navigate('alerts-view')">0 sự kiện</span>
+                    </div>
+                    <div class="alerts-container" id="alerts-list"></div>
+                </div>
+
+                <div class="detail-panel" id="detail-pane" style="display: none;">
+                    <div class="detail-header-info">
+                        <div class="detail-cand-meta">
+                            <span class="detail-cand-title" id="det-cand-id">id01</span>
+                            <span class="detail-cand-name" id="det-cand-name">Nguyễn Văn An</span>
+                            <span class="detail-cand-sub" id="det-cand-exam" style="font-family: var(--font-mono);">SBD: 22520001</span>
+                        </div>
+                        <span class="candidate-badge badge-safe" id="det-cand-status-badge">SAFE</span>
+                    </div>
+
+                    <div class="detail-feed-box">
+                        <canvas class="detail-feed-canvas" id="det-canvas-front"></canvas>
+                        <div class="feed-label-tag">CAM: TRỰC DIỆN (GƯƠNG MẶT)</div>
+                        <div class="laser-scanner color-blue"></div>
+                    </div>
+
+                    <div class="detail-feed-box" style="aspect-ratio: 16/9;">
+                        <canvas class="detail-feed-canvas" id="det-canvas-screen"></canvas>
+                        <div class="feed-label-tag" style="background: rgba(99,102,241,0.8);">MÀN HÌNH LÀM BÀI (SCREEN)</div>
+                    </div>
+
+                    <div class="detail-suspicion">
+                        <div class="detail-suspicion-hdr">
+                            <span>Chỉ Số Nghi Vấn (AI Tracking)</span>
+                            <span id="det-suspicion-txt">0%</span>
+                        </div>
+                        <div class="detail-suspicion-bar">
+                            <div class="detail-suspicion-fill" id="det-suspicion-fill"></div>
+                        </div>
+                    </div>
+
+                    <div style="display: flex; flex-direction: column; gap: 0.25rem;">
+                        <span style="font-size: 0.7rem; font-weight: 600; color: var(--text-secondary)">LỊCH SỬ LOG THÍ SINH</span>
+                        <div class="cand-log-container" id="det-cand-logs"></div>
+                    </div>
+
+                    <div class="cand-action-group">
+                        <button class="cand-btn btn-warning-action" onclick="sendWarningVoice()">
+                            <svg width="12" height="12" fill="currentColor" viewBox="0 0 24 24"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"/></svg> Cảnh Báo Voice
+                        </button>
+                        <button class="cand-btn btn-danger-action" onclick="disqualifyCandidate()">
+                            <svg width="12" height="12" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg> Đình Chỉ
+                        </button>
+                        <button class="cand-btn btn-success-action" onclick="resetCandidateStatus()">
+                            Giải Trừ Nghi Vấn
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <div class="modal-overlay" id="profileModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <div class="modal-title">Hồ sơ cá nhân</div>
+                <button class="close-modal-btn" onclick="closeModal('profileModal')"><svg width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"></path></svg></button>
+            </div>
+            <div style="display: flex; gap: 1.5rem; align-items: center;">
+                <div class="user-avatar" style="width: 80px; height: 80px; font-size: 2rem;">AD</div>
+                <div style="flex: 1;">
+                    <button class="filter-btn" style="padding: 0.4rem 0.8rem; font-size: 0.8rem;" onclick="showToast('Đang mở thư mục chọn ảnh...')">Đổi ảnh đại diện</button>
+                </div>
+            </div>
+            <div class="grid-2-col">
+                <div class="form-group"><label class="form-label">Họ tên</label><input type="text" class="form-input" value="Admin Proctor"></div>
+                <div class="form-group"><label class="form-label">Vai trò</label><input type="text" class="form-input" value="Quản trị viên hệ thống" disabled style="opacity: 0.6;"></div>
+                <div class="form-group"><label class="form-label">Email</label><input type="email" class="form-input" value="admin@uit.edu.vn"></div>
+                <div class="form-group"><label class="form-label">Số điện thoại</label><input type="text" class="form-input" value="0901234567"></div>
+            </div>
+            <div class="form-group"><label class="form-label">Ngày tạo tài khoản</label><input type="text" class="form-input" value="15/08/2023" disabled style="opacity: 0.6;"></div>
+            <div class="modal-actions">
+                <button class="filter-btn" style="background: transparent; border: none;" onclick="closeModal('profileModal')">Hủy</button>
+                <button class="cam-trigger-btn" onclick="closeModal('profileModal'); showToast('Cập nhật thành công!');">Cập nhật thông tin</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal-overlay" id="changePasswordModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <div class="modal-title">Đổi mật khẩu</div>
+                <button class="close-modal-btn" onclick="closeModal('changePasswordModal')"><svg width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"></path></svg></button>
+            </div>
+            <form id="change-password-form" style="display:flex; flex-direction:column; gap:1rem;">
+                <div class="form-group"><label class="form-label">Mật khẩu hiện tại</label><input type="password" id="current-password" class="form-input" placeholder="Nhập mật khẩu hiện tại"></div>
+                <div class="form-group"><label class="form-label">Mật khẩu mới</label><input type="password" id="new-password" class="form-input" placeholder="Nhập mật khẩu mới"></div>
+                <div class="form-group"><label class="form-label">Xác nhận mật khẩu mới</label><input type="password" id="confirm-password" class="form-input" placeholder="Nhập lại mật khẩu mới"></div>
+                <div class="modal-actions" style="justify-content: flex-end;">
+                    <button type="button" class="filter-btn" style="background: transparent; border: none;" onclick="closeModal('changePasswordModal')">Hủy</button>
+                    <button type="button" class="cam-trigger-btn" onclick="submitPasswordChange()">Lưu mật khẩu</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <div class="modal-overlay" id="examModal">
+        <div class="modal-content">
+            <div class="modal-header"><div class="modal-title">Tạo kỳ thi mới</div><button class="close-modal-btn" onclick="closeModal('examModal')"><svg width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"></path></svg></button></div>
+            <div class="grid-2-col">
+                <div class="form-group"><label class="form-label">Mã kỳ thi</label><input type="text" class="form-input" placeholder="VD: SE102_CK"></div>
+                <div class="form-group"><label class="form-label">Tên kỳ thi</label><input type="text" class="form-input" placeholder="Cuối kỳ Nhập môn CNPM"></div>
+                <div class="form-group"><label class="form-label">Môn thi</label><input type="text" class="form-input"></div>
+                <div class="form-group"><label class="form-label">Thời lượng (phút)</label><input type="number" class="form-input" value="90"></div>
+                <div class="form-group"><label class="form-label">Ngày thi</label><input type="date" class="form-input"></div>
+                <div class="form-group"><label class="form-label">Ca thi</label><input type="time" class="form-input"></div>
+            </div>
+            <div class="modal-actions"><button class="filter-btn" style="background: transparent;" onclick="closeModal('examModal')">Hủy</button><button class="cam-trigger-btn" onclick="closeModal('examModal'); showToast('Đã tạo kỳ thi!');">Lưu kỳ thi</button></div>
+        </div>
+    </div>
+
+    <div class="modal-overlay" id="candidateModal">
+        <div class="modal-content">
+            <div class="modal-header"><div class="modal-title">Thêm thí sinh mới</div><button class="close-modal-btn" onclick="closeModal('candidateModal')"><svg width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"></path></svg></button></div>
+            <div class="grid-2-col">
+                <div class="form-group"><label class="form-label">MSSV</label><input id="candidate-mssv" type="text" class="form-input"></div>
+                <div class="form-group"><label class="form-label">Họ tên</label><input id="candidate-name" type="text" class="form-input"></div>
+                <div class="form-group"><label class="form-label">Lớp</label><input id="candidate-class" type="text" class="form-input"></div>
+                <div class="form-group"><label class="form-label">Email</label><input id="candidate-email" type="email" class="form-input"></div>
+                <div class="form-group" style="grid-column: span 2;"><label class="form-label">Phòng thi chỉ định</label><input id="candidate-room" type="text" class="form-input" placeholder="A101"></div>
+            </div>
+            <div class="modal-actions"><button class="filter-btn" style="background: transparent;" onclick="closeModal('candidateModal')">Hủy</button><button class="cam-trigger-btn" onclick="addCandidate()">Thêm</button></div>
+        </div>
+    </div>
+
+    <div class="modal-overlay" id="proctorModal">
+        <div class="modal-content">
+            <div class="modal-header"><div class="modal-title">Thêm giám thị</div><button class="close-modal-btn" onclick="closeModal('proctorModal')"><svg width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"></path></svg></button></div>
+            <div class="grid-2-col">
+                <div class="form-group"><label class="form-label">Mã Giám Thị</label><input id="proctor-id" type="text" class="form-input" placeholder="GT001"></div>
+                <div class="form-group"><label class="form-label">Họ tên</label><input id="proctor-name" type="text" class="form-input"></div>
+                <div class="form-group"><label class="form-label">Email</label><input id="proctor-email" type="email" class="form-input"></div>
+                <div class="form-group"><label class="form-label">Số điện thoại</label><input id="proctor-phone" type="text" class="form-input"></div>
+                <div class="form-group"><label class="form-label">Phòng phụ trách</label><input id="proctor-room" type="text" class="form-input" placeholder="A101, B202..."></div>
+                <div class="form-group"><label class="form-label">Ca trực</label><input id="proctor-shift" type="text" class="form-input" placeholder="Sáng / Chiều"></div>
+            </div>
+            <div class="modal-actions"><button class="filter-btn" style="background: transparent;" onclick="closeModal('proctorModal')">Hủy</button><button class="cam-trigger-btn" onclick="addProctor()">Lưu</button></div>
+        </div>
+    </div>
+
+    <script>
+        function generateCandidates(roomId, count) {
+            let cands = {};
+            for(let i=1; i<=count; i++) {
+                let id = `id${roomId}_${i}`;
+                cands[id] = { id: id, name: `Thí sinh ${i} (${roomId})`, sbd: `2252${i.toString().padStart(3, '0')}`, status: "safe", suspicion: 0, logs: [], ticks: 0 };
+            }
+            return cands;
+        }
+
+        const roomsData = {
+            "B202": { name: "B202", subject: "Thiết Kế Kiến Trúc Phần Mềm", examStatus: "đang thi", status: "safe", candidates: generateCandidates("B202", 5) },
+            "A101": { name: "A101", subject: "Trí Tuệ Nhân Tạo & Học Máy", examStatus: "đang thi", status: "safe", candidates: generateCandidates("A101", 8) },
+            "C305": { name: "C305", subject: "Phân Tích Dữ Liệu Lớn", examStatus: "đang thi", status: "safe", candidates: generateCandidates("C305", 6) },
+            "D102": { name: "D102", subject: "Mật Mã Học & An Ninh Mạng", examStatus: "đang thi", status: "safe", candidates: generateCandidates("D102", 10) },
+            "E104": { name: "E104", subject: "Cơ Sở Dữ Liệu", examStatus: "chưa thi", status: "safe", candidates: generateCandidates("E104", 5) },
+            "E205": { name: "E205", subject: "Mạng Máy Tính", examStatus: "chưa thi", status: "safe", candidates: generateCandidates("E205", 6) },
+            "F101": { name: "F101", subject: "Toán Rời Rạc", examStatus: "chưa thi", status: "safe", candidates: generateCandidates("F101", 8) },
+            "F102": { name: "F102", subject: "Lập Trình Web", examStatus: "chưa thi", status: "safe", candidates: generateCandidates("F102", 10) },
+            "G301": { name: "G301", subject: "Hệ Điều Hành", examStatus: "chưa thi", status: "safe", candidates: generateCandidates("G301", 5) },
+            "G302": { name: "G302", subject: "Cấu Trúc Dữ Liệu", examStatus: "chưa thi", status: "safe", candidates: generateCandidates("G302", 7) }
+        };
+
+        let currentRoomId = null; 
+        let candidates = {}; 
+        let selectedCandidateId = null;
+        const alertsList = [];
+
+        const candidateManagementList = [
+            { id: '22520001', name: 'Nguyễn Văn An', className: 'SE114.N21', room: 'A101', status: 'Đang thi', statusClass: 'success', warning: 0, violation: 0 },
+            { id: '22520005', name: 'Bùi Tuấn Anh', className: 'CS112.N11', room: 'B202', status: 'Đình chỉ', statusClass: 'danger', warning: 3, violation: 1 }
+        ];
+
+        const proctorManagementList = [
+            { id: 'GT_012', name: 'Lê Minh Trí', phone: '0901234567', room: 'A101, A102', shift: 'Sáng', status: 'Đang trực', statusClass: 'success' },
+            { id: 'GT_045', name: 'Phạm Thu Thủy', phone: '0987654321', room: 'B202', shift: 'Chiều', status: 'Ngoại tuyến', statusClass: 'text-secondary' }
+        ];
+
+        let ticksGlobal = 0;
+        window.isWebcamActive = false;
+        let wsConnection = null;
+        let frameInterval = null;
+        let lastFrameTime = performance.now();
+
+        // CCTV Webcam Integration Variables
+        window.isCctvWebcamActive = false;
+        window.cctvProcessedImage = null;
+        window.activeUserDeviceId = null;
+        window.activeCctvDeviceId = null;
+        let wsConnectionCCTV = null;
+        let frameIntervalCCTV = null;
+        let lastFrameTimeCCTV = performance.now();
+
+        window.isExamActive = false;
+
+        function toggleGlobalSession() {
+            const btn = document.getElementById("global-session-btn");
+            const dot = document.getElementById("global-session-dot");
+            const txt = document.getElementById("global-session-text");
+            if (!btn || !txt || !dot) return;
+
+            window.isExamActive = !window.isExamActive;
+
+            if (window.isExamActive) {
+                btn.style.background = "linear-gradient(135deg, #ef4444 0%, #dc2626 100%)";
+                btn.style.boxShadow = "0 0 15px rgba(239, 68, 68, 0.4)";
+                dot.style.animation = "pulse-danger-bg 1.5s infinite";
+                txt.innerText = "Kết thúc phiên thi";
+                showToast("Phiên thi đã BẮT ĐẦU. Đang kích hoạt các tính năng phát hiện gian lận AI.");
+            } else {
+                btn.style.background = "linear-gradient(135deg, #10b981 0%, #059669 100%)";
+                btn.style.boxShadow = "0 0 10px rgba(16, 185, 129, 0.2)";
+                dot.style.animation = "none";
+                txt.innerText = "Bắt đầu phiên thi";
+                showToast("Phiên thi đã KẾT THÚC. Đã tạm dừng phát hiện gian lận.");
+            }
+        }
+
+        // AI Configuration Variables
+        window.aiConfig = {
+            confThreshold: 0.35,
+            maxDisappearedTime: 3.0,
+            lookAwayTime: 3.0,
+            gazeRatio: 0.85,
+            faceConf: 0.70
+        };
+
+        const detailPane = document.getElementById("detail-pane");
+        const detCanvasFront = document.getElementById("det-canvas-front");
+        const ctxFront = detCanvasFront.getContext("2d");
+        detCanvasFront.width = 320; detCanvasFront.height = 200;
+
+        const detCanvasScreen = document.getElementById("det-canvas-screen");
+        const ctxScreen = detCanvasScreen.getContext("2d");
+        detCanvasScreen.width = 320; detCanvasScreen.height = 180;
+
+        function handleSearchInput(val) {
+            const suggestionsBox = document.getElementById('search-suggestions');
+            const term = val.trim().toLowerCase();
+            
+            if (!term) {
+                suggestionsBox.style.display = 'none';
+                for (let rId in roomsData) {
+                    const card = document.getElementById(`cctv-card-${rId}`);
+                    if (card && roomsData[rId].examStatus === 'đang thi') card.style.display = 'flex';
+                }
+                return;
+            }
+
+            let matches = [];
+            
+            for (let rId in roomsData) {
+                const room = roomsData[rId];
+                let roomMatches = room.name.toLowerCase().includes(term);
+                let matchedCandidates = [];
+                
+                for (let cId in room.candidates) {
+                    const cand = room.candidates[cId];
+                    if (cand.name.toLowerCase().includes(term) || cand.sbd.toLowerCase().includes(term) || cand.id.toLowerCase().includes(term)) {
+                        matchedCandidates.push(cand);
+                    }
+                }
+                
+                const card = document.getElementById(`cctv-card-${rId}`);
+                if (card && room.examStatus === 'đang thi') {
+                    if (roomMatches || matchedCandidates.length > 0) card.style.display = 'flex';
+                    else card.style.display = 'none';
+                }
+
+                if (roomMatches) matches.push({ type: 'room', id: rId, text: `Phòng ${rId}` });
+                matchedCandidates.forEach(cand => {
+                    matches.push({ type: 'cand', roomId: rId, candId: cand.id, text: `${cand.id.toUpperCase()} - ${cand.name}` });
+                });
+            }
+
+            if (matches.length > 0) {
+                suggestionsBox.innerHTML = matches.map(m => {
+                    if (m.type === 'room') return `<div onclick="selectSuggestion('room', '${m.id}')" style="padding: 0.6rem 1rem; cursor: pointer; border-bottom: 1px solid rgba(255,255,255,0.05); font-size: 0.8rem; transition: 0.2s;" onmouseover="this.style.background='rgba(99,102,241,0.2)'" onmouseout="this.style.background='transparent'">🏠 ${m.text}</div>`;
+                    else return `<div onclick="selectSuggestion('cand', '${m.roomId}', '${m.candId}')" style="padding: 0.6rem 1rem; cursor: pointer; border-bottom: 1px solid rgba(255,255,255,0.05); font-size: 0.8rem; transition: 0.2s;" onmouseover="this.style.background='rgba(99,102,241,0.2)'" onmouseout="this.style.background='transparent'">👤 ${m.text}</div>`;
+                }).join('');
+                suggestionsBox.style.display = 'block';
+            } else {
+                suggestionsBox.innerHTML = `<div style="padding: 0.6rem 1rem; font-size: 0.8rem; color: var(--text-secondary);">Không tìm thấy kết quả</div>`;
+                suggestionsBox.style.display = 'block';
+            }
+        }
+
+        function handleAlertsSearchInput(val) {
+            const suggestionsBox = document.getElementById('alerts-search-suggestions');
+            const term = val.trim().toLowerCase();
+            
+            renderAlertsTable(); 
+
+            if (!term) {
+                suggestionsBox.style.display = 'none';
+                return;
+            }
+
+            let matches = [];
+            
+            for (let rId in roomsData) {
+                const room = roomsData[rId];
+                let roomMatches = room.name.toLowerCase().includes(term);
+                let matchedCandidates = [];
+                
+                for (let cId in room.candidates) {
+                    const cand = room.candidates[cId];
+                    if (cand.name.toLowerCase().includes(term) || cand.sbd.toLowerCase().includes(term) || cId.toLowerCase().includes(term)) {
+                        matchedCandidates.push(cand);
+                    }
+                }
+
+                if (roomMatches) matches.push({ type: 'room', id: rId, text: `Phòng ${rId}` });
+                matchedCandidates.forEach(cand => {
+                    matches.push({ type: 'cand', roomId: rId, candId: cand.id, text: `${cand.id.toUpperCase()} - ${cand.name}` });
+                });
+            }
+
+            if (matches.length > 0) {
+                suggestionsBox.innerHTML = matches.map(m => {
+                    if (m.type === 'room') return `<div onclick="selectAlertsSuggestion('${m.id}')" style="padding: 0.6rem 1rem; cursor: pointer; border-bottom: 1px solid rgba(255,255,255,0.05); font-size: 0.8rem; transition: 0.2s;" onmouseover="this.style.background='rgba(99,102,241,0.2)'" onmouseout="this.style.background='transparent'">🏠 ${m.text}</div>`;
+                    else return `<div onclick="selectAlertsSuggestion('${m.candId.toUpperCase()}')" style="padding: 0.6rem 1rem; cursor: pointer; border-bottom: 1px solid rgba(255,255,255,0.05); font-size: 0.8rem; transition: 0.2s;" onmouseover="this.style.background='rgba(99,102,241,0.2)'" onmouseout="this.style.background='transparent'">👤 ${m.text}</div>`;
+                }).join('');
+                suggestionsBox.style.display = 'block';
+            } else {
+                suggestionsBox.innerHTML = `<div style="padding: 0.6rem 1rem; font-size: 0.8rem; color: var(--text-secondary);">Không tìm thấy kết quả</div>`;
+                suggestionsBox.style.display = 'block';
+            }
+        }
+
+        function selectSuggestion(type, roomId, candId = null) {
+            const input = document.getElementById('room-search-input');
+            if (input) input.value = '';
+            document.getElementById('search-suggestions').style.display = 'none';
+            handleSearchInput(''); 
+
+            navigate('room-monitor-view', roomId);
+            if (type === 'cand' && candId) {
+                setTimeout(() => { selectCandidate(candId); }, 100); 
+            }
+        }
+
+        function selectAlertsSuggestion(keyword) {
+            const input = document.getElementById('alerts-search-input');
+            if (input) input.value = keyword;
+            document.getElementById('alerts-search-suggestions').style.display = 'none';
+            renderAlertsTable(); 
+        }
+
+        async function enumerateDashboardCameras() {
+            try {
+                // Request temporary permission to unlock camera labels
+                const tempStream = await navigator.mediaDevices.getUserMedia({ video: true });
+                tempStream.getTracks().forEach(track => track.stop());
+                
+                const devices = await navigator.mediaDevices.enumerateDevices();
+                const videoDevices = devices.filter(device => device.kind === 'videoinput');
+                
+                const userSelect = document.getElementById("user-camera-select");
+                const cctvSelect = document.getElementById("cctv-camera-select");
+                
+                userSelect.innerHTML = "";
+                cctvSelect.innerHTML = "";
+                
+                if (videoDevices.length === 0) {
+                    userSelect.innerHTML = `<option value="">No Camera</option>`;
+                    cctvSelect.innerHTML = `<option value="">No Camera</option>`;
+                    return;
+                }
+                
+                videoDevices.forEach((device, index) => {
+                    const name = device.label || `Camera ${index + 1}`;
+                    
+                    const optionUser = document.createElement("option");
+                    optionUser.value = device.deviceId;
+                    optionUser.text = name;
+                    
+                    const optionCctv = document.createElement("option");
+                    optionCctv.value = device.deviceId;
+                    optionCctv.text = name;
+                    
+                    userSelect.appendChild(optionUser);
+                    cctvSelect.appendChild(optionCctv);
+                });
+                
+                // Smart auto-select logic
+                let userDeviceIndex = 0;
+                let cctvDeviceIndex = videoDevices.length > 1 ? 1 : 0;
+                
+                let iriunIndex = -1;
+                let integratedIndex = -1;
+                
+                videoDevices.forEach((device, index) => {
+                    const name = device.label.toLowerCase();
+                    if (name.includes("iriun")) {
+                        iriunIndex = index;
+                    }
+                    if (name.includes("integrated") || name.includes("front") || name.includes("built-in") || name.includes("laptop")) {
+                        integratedIndex = index;
+                    }
+                });
+                
+                if (iriunIndex !== -1) {
+                    cctvDeviceIndex = iriunIndex;
+                    if (integratedIndex !== -1 && integratedIndex !== iriunIndex) {
+                        userDeviceIndex = integratedIndex;
+                    } else {
+                        userDeviceIndex = (iriunIndex === 0 && videoDevices.length > 1) ? 1 : 0;
+                    }
+                } else {
+                    if (videoDevices.length > 1) {
+                        if (integratedIndex !== -1) {
+                            userDeviceIndex = integratedIndex;
+                            cctvDeviceIndex = (integratedIndex === 0) ? 1 : 0;
+                        } else {
+                            userDeviceIndex = 0;
+                            cctvDeviceIndex = 1;
+                        }
+                    } else {
+                        userDeviceIndex = 0;
+                        cctvDeviceIndex = 0;
+                    }
+                }
+                
+                userSelect.selectedIndex = userDeviceIndex;
+                cctvSelect.selectedIndex = cctvDeviceIndex;
+                
+            } catch (err) {
+                console.error("Lỗi dò tìm camera trên Dashboard: ", err);
+            }
+        }
+
+        async function startWebcam() {
+            try {
+                const userSelectEl = document.getElementById("user-camera-select");
+                const cctvSelectEl = document.getElementById("cctv-camera-select");
+                const userDeviceId = userSelectEl ? userSelectEl.value : null;
+                const cctvDeviceId = cctvSelectEl ? cctvSelectEl.value : null;
+                
+                if (!userDeviceId) {
+                    console.log("No candidate camera device selected yet.");
+                    return;
+                }
+                
+                // 1. Start User camera if not already active or if device changed
+                if (!window.isWebcamActive || window.activeUserDeviceId !== userDeviceId) {
+                    if (window.isWebcamActive) {
+                        const videoEl = document.getElementById('real-webcam');
+                        if (videoEl.srcObject) {
+                            videoEl.srcObject.getTracks().forEach(t => t.stop());
+                        }
+                    }
+                    
+                    showToast('Đang kích hoạt camera thí sinh...');
+                    const userConstraints = { video: { deviceId: { exact: userDeviceId }, width: 640, height: 480 } };
+                    const userStream = await navigator.mediaDevices.getUserMedia(userConstraints);
+                    const userVideo = document.getElementById('real-webcam');
+                    userVideo.srcObject = userStream;
+                    window.isWebcamActive = true;
+                    window.activeUserDeviceId = userDeviceId;
+                    
+                    startWebSocketProctoring();
+                }
+                
+                // 2. Start CCTV camera (if secondary device is chosen, different from user camera, and not already active on this device)
+                if (cctvDeviceId && cctvDeviceId !== userDeviceId) {
+                    if (!window.isCctvWebcamActive || window.activeCctvDeviceId !== cctvDeviceId) {
+                        if (window.isCctvWebcamActive) {
+                            const videoEl = document.getElementById('real-cctv-webcam');
+                            if (videoEl.srcObject) {
+                                videoEl.srcObject.getTracks().forEach(t => t.stop());
+                            }
+                        }
+                        
+                        const selectedCctvName = cctvSelectEl.options[cctvSelectEl.selectedIndex].text;
+                        showToast(`Đang kích hoạt camera tổng thực tế: ${selectedCctvName}`);
+                        
+                        const cctvConstraints = { video: { deviceId: { exact: cctvDeviceId }, width: 640, height: 480 } };
+                        const cctvStream = await navigator.mediaDevices.getUserMedia(cctvConstraints);
+                        const cctvVideo = document.getElementById('real-cctv-webcam');
+                        cctvVideo.srcObject = cctvStream;
+                        window.isCctvWebcamActive = true;
+                        window.activeCctvDeviceId = cctvDeviceId;
+                        
+                        startWebSocketCCTVProctoring();
+                    }
+                } else if (cctvDeviceId && cctvDeviceId === userDeviceId) {
+                    if (window.isCctvWebcamActive) {
+                        showToast("Chuyển camera tổng sang chế độ mô phỏng phòng thi...");
+                        const videoEl = document.getElementById('real-cctv-webcam');
+                        if (videoEl.srcObject) {
+                            videoEl.srcObject.getTracks().forEach(t => t.stop());
+                        }
+                        videoEl.srcObject = null;
+                        window.isCctvWebcamActive = false;
+                        window.activeCctvDeviceId = null;
+                        if (wsConnectionCCTV) {
+                            wsConnectionCCTV.close();
+                            wsConnectionCCTV = null;
+                        }
+                    }
+                }
+                
+                const selectionPanel = document.getElementById('camera-selection-panel');
+                if (selectionPanel) {
+                    selectionPanel.style.opacity = '0.8';
+                }
+                
+                const startBtn = document.getElementById('start-webcam-btn');
+                if (startBtn) {
+                    startBtn.style.display = 'none';
+                }
+                
+            } catch (err) {
+                console.error("Camera access error:", err);
+            }
+        }
+
+        async function startWebSocketCCTVProctoring() {
+            if (wsConnectionCCTV) {
+                wsConnectionCCTV.close();
+            }
+            
+            const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+            const wsUrl = `${protocol}//${window.location.host}/ws/stream`;
+            
+            wsConnectionCCTV = new WebSocket(wsUrl);
+            
+            const hiddenCanvas = document.createElement("canvas");
+            hiddenCanvas.width = 640;
+            hiddenCanvas.height = 480;
+            const ctx = hiddenCanvas.getContext("2d");
+            
+            function sendNextCCTVFrame() {
+                if (!window.isCctvWebcamActive || !wsConnectionCCTV || wsConnectionCCTV.readyState !== WebSocket.OPEN) return;
+                
+                const videoEl = document.getElementById('real-cctv-webcam');
+                if (videoEl.readyState >= 2) {
+                    ctx.drawImage(videoEl, 0, 0, 640, 480);
+                    const imgBase64 = hiddenCanvas.toDataURL("image/jpeg", 0.65);
+                    
+                    const payload = {
+                        image: imgBase64,
+                        threshold: window.aiConfig.confThreshold,
+                        max_disappeared_time: window.aiConfig.maxDisappearedTime,
+                        look_away_time: window.aiConfig.lookAwayTime,
+                        exam_active: window.isExamActive,
+                        monitoring_mode: "cctv"
+                    };
+                    wsConnectionCCTV.send(JSON.stringify(payload));
+                    lastFrameTimeCCTV = performance.now();
+                } else {
+                    frameIntervalCCTV = setTimeout(sendNextCCTVFrame, 100);
+                }
+            }
+            
+            wsConnectionCCTV.onopen = () => {
+                console.log("WebSocket CCTV proctoring connected.");
+                sendNextCCTVFrame();
+            };
+            
+            wsConnectionCCTV.onmessage = (event) => {
+                const response = JSON.parse(event.data);
+                const frameSrc = response.image;
+                const metrics = response.metrics;
+                
+                window.cctvProcessedImage = frameSrc;
+                if (window.isCctvWebcamActive) {
+                    if (!window.cctvImgElement) {
+                        window.cctvImgElement = new Image();
+                    }
+                    window.cctvImgElement.src = frameSrc;
+                }
+                
+                // If there are CCTV global room violations (e.g. stranger, left position), append alert
+                if (currentRoomId && metrics.violations && metrics.violations.length > 0) {
+                    const nowSecs = getTimestampSeconds();
+                    metrics.violations.forEach(v => {
+                        const alreadyLogged = alertsList.some(alert => alert.roomId === currentRoomId && alert.message === v && (getTimestampSeconds(alert.time) > nowSecs - 8));
+                        if (!alreadyLogged) {
+                            let severity = (v.includes("rời khỏi") || v.includes("người lạ")) ? "critical" : "warning";
+                            appendAlert(currentRoomId, "cctv", v, severity);
+                        }
+                    });
+                }
+                
+                if (window.isCctvWebcamActive) {
+                    frameIntervalCCTV = setTimeout(sendNextCCTVFrame, 80);
+                }
+            };
+            
+            wsConnectionCCTV.onerror = (e) => {
+                console.error("WebSocket CCTV error: ", e);
+            };
+            
+            wsConnectionCCTV.onclose = () => {
+                console.log("WebSocket CCTV disconnected.");
+            };
+        }
+
+        function getTimestampSeconds(tStr = null) {
+            const timeStr = tStr || getTimestamp();
+            const parts = timeStr.split(':');
+            if (parts.length < 3) return 0;
+            return parseInt(parts[0]) * 3600 + parseInt(parts[1]) * 60 + parseInt(parts[2]);
+        }
+
+        async function startWebSocketProctoring() {
+            if (wsConnection) {
+                wsConnection.close();
+            }
+            
+            const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+            const wsUrl = `${protocol}//${window.location.host}/ws/stream`;
+            
+            showToast('Đang kết nối hệ thống phân tích AI qua WebSocket...');
+            wsConnection = new WebSocket(wsUrl);
+            
+            const hiddenCanvas = document.createElement("canvas");
+            hiddenCanvas.width = 640;
+            hiddenCanvas.height = 480;
+            const ctx = hiddenCanvas.getContext("2d");
+            
+            function sendNextFrame() {
+                if (!window.isWebcamActive || !wsConnection || wsConnection.readyState !== WebSocket.OPEN) return;
+                
+                const videoEl = document.getElementById('real-webcam');
+                if (videoEl.readyState >= 2) {
+                    ctx.drawImage(videoEl, 0, 0, 640, 480);
+                    const imgBase64 = hiddenCanvas.toDataURL("image/jpeg", 0.65);
+                    
+                    const candId = currentRoomId ? `id${currentRoomId}_1`.toLowerCase() : "";
+                    const payload = {
+                        image: imgBase64,
+                        student_id: candId,
+                        threshold: window.aiConfig.confThreshold,
+                        max_disappeared_time: window.aiConfig.maxDisappearedTime,
+                        look_away_time: window.aiConfig.lookAwayTime,
+                        exam_active: window.isExamActive,
+                        monitoring_mode: "webcam"
+                    };
+                    wsConnection.send(JSON.stringify(payload));
+                    lastFrameTime = performance.now();
+                } else {
+                    frameInterval = setTimeout(sendNextFrame, 100);
+                }
+            }
+            
+            wsConnection.onopen = () => {
+                showToast('Hệ thống AI đã kết nối thành công. Bắt đầu phân tích!');
+                sendNextFrame();
+            };
+            
+            wsConnection.onmessage = (event) => {
+                const response = JSON.parse(event.data);
+                const frameSrc = response.image;
+                const screenSrc = response.screen_image;
+                const metrics = response.metrics;
+                
+                if (currentRoomId) {
+                    const candId = `id${currentRoomId}_1`;
+                    const room = roomsData[currentRoomId];
+                    if (room && room.candidates && room.candidates[candId]) {
+                        const cand = room.candidates[candId];
+                        cand.processedImage = frameSrc;
+                        if (!cand.imgElement) {
+                            cand.imgElement = new Image();
+                        }
+                        cand.imgElement.src = frameSrc;
+                        if (screenSrc) {
+                            cand.screenImage = screenSrc;
+                        }
+                        cand.suspicion = metrics.suspicion_index;
+                        
+                        let oldStatus = cand.status;
+                        if (metrics.num_phones > 0 || metrics.suspicion_index >= 90) {
+                            cand.status = "danger";
+                        } else if (metrics.suspicion_index >= 40) {
+                            cand.status = "warning";
+                        } else {
+                            cand.status = "safe";
+                        }
+                        
+                        // Prevent status resets by locking status if there's an exam violation in the last 15 seconds
+                        const nowSecs = getTimestampSeconds();
+                        const recentExamViolation = cand.logs.find(log => {
+                            const isExamViolation = log.text.includes("sao chép") || log.text.includes("chuyển tab") || log.text.includes("dừng chia sẻ") || log.text.includes("ẩn màn hình");
+                            return isExamViolation && (nowSecs - getTimestampSeconds(log.time) < 15);
+                        });
+                        
+                        if (recentExamViolation) {
+                            const isCritical = recentExamViolation.text.includes("dừng chia sẻ");
+                            cand.status = isCritical ? "danger" : "warning";
+                            cand.suspicion = Math.max(cand.suspicion, isCritical ? 95 : 75);
+                        }
+                        
+                        // Log real violations
+                        if (metrics.violations && metrics.violations.length > 0) {
+                            metrics.violations.forEach(v => {
+                                let displayViolation = v;
+                                let isExamAlert = false;
+                                if (v.startsWith("EXAM_ALERT: ")) {
+                                    displayViolation = v.replace("EXAM_ALERT: ", "");
+                                    isExamAlert = true;
+                                }
+                                
+                                const alreadyLogged = cand.logs.some(log => log.text === displayViolation && (getTimestampSeconds(log.time) > nowSecs - 8));
+                                if (!alreadyLogged) {
+                                    let severity = "warning";
+                                    if (displayViolation.includes("điện thoại") || displayViolation.includes("rời khỏi") || displayViolation.includes("người lạ") || displayViolation.includes("dừng chia sẻ") || displayViolation.includes("CẢNH BÁO")) {
+                                        severity = "critical";
+                                    }
+                                    
+                                    if (isExamAlert) {
+                                        if (severity === "critical") {
+                                            cand.status = "danger";
+                                            cand.suspicion = Math.max(cand.suspicion, 95);
+                                        } else {
+                                            cand.status = "warning";
+                                            cand.suspicion = Math.max(cand.suspicion, 75);
+                                        }
+                                    }
+                                    
+                                    appendAlert(currentRoomId, cand.id, displayViolation, severity);
+                                }
+                            });
+                        }
+                        
+                        // Update UI
+                        updateCardVisuals(cand);
+                        updateGlobalStats();
+                        
+                        if (selectedCandidateId === cand.id) {
+                            updateDetailPanelUI(cand);
+                        }
+                    }
+                }
+                
+                if (window.isWebcamActive) {
+                    frameInterval = setTimeout(sendNextFrame, 60);
+                }
+            };
+            
+            wsConnection.onerror = (e) => {
+                console.error("WebSocket AI proctoring error: ", e);
+                showToast("Lỗi kết nối WebSocket AI.");
+            };
+            
+            wsConnection.onclose = () => {
+                console.log("WebSocket AI proctoring disconnected.");
+            };
+        }
+
+        function showToast(msg) {
+            const toast = document.createElement('div');
+            toast.innerText = msg;
+            toast.style.cssText = `
+                position: fixed; top: 20px; left: 50%; transform: translateX(-50%);
+                background: #f59e0b; color: #fff; padding: 10px 20px; border-radius: 8px;
+                box-shadow: 0 4px 12px rgba(0,0,0,0.3); z-index: 9999; font-weight: 600;
+            `;
+            document.body.appendChild(toast);
+            setTimeout(() => toast.remove(), 4000);
+        }
+
+        function confirmLogout(event) {
+            if (event && typeof event.preventDefault === 'function') {
+                event.preventDefault();
+            }
+            const confirmed = confirm('Bạn có chắc muốn đăng xuất không?');
+            if (!confirmed) return;
+            showToast('Đăng xuất thành công!');
+            setTimeout(() => location.reload(), 800);
+        }
+
+        function initAllLogs() {
+            for (let rId in roomsData) {
+                const cands = roomsData[rId].candidates;
+                for (let cId in cands) {
+                    if (cands[cId].logs.length === 0) {
+                        cands[cId].logs.push({ time: getTimestamp(), text: `Hệ thống sẵn sàng. Chờ luồng dữ liệu...`, type: "system" });
+                    }
+                }
+            }
+        }
+        initAllLogs();
+
+        function navigate(viewId, roomId = null) {
+            if (viewId === 'room-monitor-view' && !roomId) {
+                navigate('cctv-overview-view');
+                showToast('Vui lòng chọn một phòng thi từ Dashboard trước.');
+                return;
+            }
+
+            currentRoomId = roomId;
+            candidates = roomId ? roomsData[roomId].candidates : {};
+            selectedCandidateId = null;
+            detailPane.style.display = 'none';
+
+            document.querySelectorAll('.sidebar-link').forEach(l => {
+                l.classList.toggle('active', l.dataset.view === viewId);
+            });
+
+            document.querySelectorAll('.view-section').forEach(v => {
+                v.classList.toggle('active-view', v.id === viewId);
+            });
+
+            const rightSidebar = document.querySelector('.global-right-sidebar');
+            const fullWidthViews = ['alerts-view', 'violation-detail-view', 'reports-stats-view', 'exam-management-view', 'candidate-management-view', 'proctor-management-view', 'ai-config-view', 'system-logs-view', 'settings-view', 'help-view'];
+            
+            if (fullWidthViews.includes(viewId)) {
+                rightSidebar.style.display = 'none';
+            } else {
+                rightSidebar.style.display = 'flex';
+                if (viewId === 'room-monitor-view') {
+                    document.getElementById('detail-pane').style.display = 'flex';
+                    const alertsPanel = document.querySelector('.alerts-panel');
+                    if (alertsPanel) {
+                        alertsPanel.style.display = 'none';
+                    }
+                } else {
+                    document.getElementById('detail-pane').style.display = 'none';
+                    const alertsPanel = document.querySelector('.alerts-panel');
+                    if (alertsPanel) {
+                        alertsPanel.style.display = 'flex';
+                        alertsPanel.style.flex = '1';
+                        alertsPanel.style.maxHeight = '100%';
+                    }
+                }
+            }
+
+            const titles = {
+                'cctv-overview-view':        'Dashboard Tổng Quan',
+                'rooms-list-view':           'Danh Sách Phòng Thi',
+                'room-monitor-view':         'Giám Sát Phòng Thi',
+                'alerts-view':               'Bảng Thông Báo',
+                'violation-detail-view':     'Chi Tiết Vi Phạm',
+                'reports-stats-view':        'Báo cáo & Thống kê',
+                'settings-view':             'Cài đặt hệ thống',
+                'help-view':                 'Trợ giúp & Hướng dẫn',
+                'exam-management-view':      'Quản lý kỳ thi',
+                'candidate-management-view': 'Quản lý thí sinh',
+                'proctor-management-view':   'Quản lý giám thị',
+                'ai-config-view':            'Cấu hình AI',
+                'system-logs-view':          'Nhật ký hệ thống'
+            };
+            
+            const isRoomView = viewId === 'room-monitor-view' && roomId;
+            
+            document.getElementById('header-title').style.display  = isRoomView ? 'none' : 'block';
+            document.getElementById('header-title').innerText      = titles[viewId] || '';
+            document.getElementById('back-to-cctv-btn').style.display = isRoomView ? 'flex' : 'none';
+            document.getElementById('room-badge').style.display    = isRoomView ? 'inline-block' : 'none';
+            
+            document.getElementById('header-search-bar').style.display = (viewId === 'cctv-overview-view') ? 'flex' : 'none';
+            if (isRoomView) document.getElementById('room-badge').innerText = roomId;
+
+            if (viewId === 'cctv-overview-view') initCctvOverviewGrid();
+            if (viewId === 'rooms-list-view') renderRoomListTable();
+            if (viewId === 'alerts-view') renderAlertsTable();
+            if (isRoomView) initRoomMonitor(roomId);
+
+            if (viewId === 'reports-stats-view') renderReportsTable();
+            if (viewId === 'exam-management-view') renderExamTable();
+            if (viewId === 'candidate-management-view') renderCandidateTable();
+            if (viewId === 'proctor-management-view') renderProctorTable();
+            if (viewId === 'system-logs-view') renderLogsTable();
+        }
+
+        function renderRoomListTable() {
+            const tbody = document.getElementById("rooms-table-body");
+            const filterStatus = document.getElementById("room-list-filter").value;
+            const searchKeyword = document.getElementById("room-list-search").value.toLowerCase().trim();
+            
+            tbody.innerHTML = "";
+            
+            for (let rId in roomsData) {
+                const rData = roomsData[rId];
+                
+                if (filterStatus !== 'all' && rData.examStatus !== filterStatus) continue;
+                if (searchKeyword && !rId.toLowerCase().includes(searchKeyword)) continue;
+                
+                const candCount = Object.keys(rData.candidates).length;
+                let displayCount = candCount;
+
+                const statusColor = rData.examStatus === "đang thi" ? "var(--success)" : "#fff";
+                const actionBtn = rData.examStatus === "đang thi" 
+                    ? `<button class="filter-btn" style="padding: 0.4rem 0.8rem; font-size: 0.75rem; white-space: nowrap; display:inline-block;" onclick="navigate('room-monitor-view', '${rId}')">Xem</button>`
+                    : `<button class="filter-btn" style="padding: 0.4rem 0.8rem; font-size: 0.75rem; background: rgba(255,255,255,0.1); color: #fff; border-color: rgba(255,255,255,0.4); white-space: nowrap; display:inline-block;" onclick="startExam('${rId}', ${displayCount})">Bắt đầu giám sát</button>`;
+
+                const tr = document.createElement("tr");
+                tr.innerHTML = `
+                    <td style="font-weight: 600; text-align: left;">${rId}</td>
+                    <td style="text-align: left;">${rData.subject}</td>
+                    <td style="text-align: center;">${displayCount}</td>
+                    <td style="color: ${statusColor}; font-weight: ${rData.examStatus === 'đang thi' ? '700' : '500'}; text-transform: capitalize; text-align: center;">${rData.examStatus}</td>
+                    <td class="actions-col">${actionBtn}</td>
+                `;
+                tbody.appendChild(tr);
+            }
+        }
+
+        function renderAlertsTable() {
+            const tbody = document.getElementById("alerts-table-body");
+            const filterLevel = document.getElementById("alerts-list-filter").value;
+            const searchInput = document.getElementById("alerts-search-input");
+            const searchKeyword = searchInput ? searchInput.value.toLowerCase().trim() : '';
+            tbody.innerHTML = "";
+
+            alertsList.forEach(alert => {
+                if (filterLevel !== 'all' && alert.severity !== filterLevel) return;
+
+                const displayId = alert.candId.toUpperCase();
+                
+                if (searchKeyword && !alert.roomId.toLowerCase().includes(searchKeyword) && !displayId.toLowerCase().includes(searchKeyword)) return;
+
+                let tagHtml = '';
+                if (alert.severity === 'critical') tagHtml = '<span class="alert-tag tag-high">CẢNH BÁO</span>';
+                else if (alert.severity === 'warning') tagHtml = '<span class="alert-tag tag-medium">NGHI NGỜ</span>';
+                else tagHtml = '<span class="alert-tag" style="background: rgba(16, 185, 129, 0.15); color: #6ee7b7; border: 1px solid rgba(16, 185, 129, 0.4);">AN TOÀN</span>';
+
+                const tr = document.createElement("tr");
+                tr.style.cursor = 'pointer';
+                tr.onclick = () => {
+                    navigate('room-monitor-view', alert.roomId);
+                    setTimeout(() => selectCandidate(alert.candId), 100);
+                };
+
+                tr.innerHTML = `
+                    <td style="font-family:var(--font-mono); text-align: left;">${alert.time}</td>
+                    <td style="font-weight: 600; text-align: left;">${alert.roomId}</td>
+                    <td style="text-align: left;">${displayId}</td>
+                    <td style="text-align: left;">${alert.message}</td>
+                    <td style="text-align: center;">${tagHtml}</td>
+                    <td class="actions-col" style="text-align: center;">
+                        <button class="filter-btn" style="padding: 0.3rem 0.6rem; font-size: 0.7rem; display: inline-block;" onclick="event.stopPropagation(); viewViolationDetail('${alert.roomId}', '${alert.candId}', '${alert.time}', '${alert.message}', '${alert.severity}')">Chi tiết</button>
+                    </td>
+                `;
+                tbody.appendChild(tr);
+            });
+        }
+
+        function viewViolationDetail(roomId, candId, time, message, severity) {
+            navigate('violation-detail-view');
+            const cand = roomsData[roomId].candidates[candId];
+            
+            document.getElementById('viol-header-title').innerText = `Hồ sơ vi phạm ${roomId} - ${candId.toUpperCase()}`;
+            document.getElementById('viol-room').innerText = roomId;
+            document.getElementById('viol-cand-id').innerText = candId.toUpperCase();
+            document.getElementById('viol-cand-name').innerText = cand.name;
+            
+            const statusBadge = document.getElementById("viol-cand-status");
+            statusBadge.innerText = cand.status.toUpperCase();
+            statusBadge.className = `candidate-badge badge-${cand.status}`;
+
+            document.getElementById('viol-desc-text').innerText = `[${time}] ${message}`;
+
+            const timelineContainer = document.getElementById('viol-timeline');
+            timelineContainer.innerHTML = '';
+            const logsToRender = cand.logs.slice().reverse(); 
+            logsToRender.forEach(log => {
+                let dotClass = '';
+                if(log.type === 'critical') dotClass = 'critical';
+                else if(log.type === 'warning') dotClass = 'warning';
+
+                timelineContainer.innerHTML += `
+                    <div class="v-timeline-item">
+                        <div class="v-timeline-dot ${dotClass}"></div>
+                        <div class="v-time">${log.time}</div>
+                        <div class="v-desc" style="color: ${log.type === 'critical' ? 'var(--danger)' : (log.type === 'warning' ? 'var(--warning)' : 'var(--text-primary)')}">${log.text}</div>
+                    </div>
+                `;
+            });
+
+            const evidenceCanvas = document.getElementById('evidence-canvas');
+            evidenceCanvas.width = 640; evidenceCanvas.height = 360;
+            const ctx = evidenceCanvas.getContext('2d');
+            
+            ctx.fillStyle = '#0a0a14';
+            ctx.fillRect(0, 0, 640, 360);
+            
+            ctx.strokeStyle = "rgba(255,255,255,0.12)"; ctx.lineWidth = 3;
+            ctx.beginPath(); ctx.moveTo(200, 360); ctx.quadraticCurveTo(280, 150, 320, 150); ctx.quadraticCurveTo(360, 150, 440, 360); ctx.stroke();
+            ctx.beginPath(); ctx.arc(320, 100, 50, 0, Math.PI * 2); ctx.stroke();
+            ctx.fillStyle = "rgba(255,255,255,0.8)";
+            ctx.beginPath(); ctx.arc(300, 90, 4, 0, Math.PI*2); ctx.fill();
+            ctx.beginPath(); ctx.arc(340, 90, 4, 0, Math.PI*2); ctx.fill();
+
+            if (severity === 'critical') {
+                document.getElementById('viol-evidence-tag').innerText = `AI DETECTED: PHONE [${time}]`;
+                document.getElementById('viol-evidence-tag').style.background = 'rgba(239, 68, 68, 0.8)';
+                ctx.strokeStyle = "rgba(239, 68, 68, 0.85)"; ctx.lineWidth = 4;
+                ctx.strokeRect(220, 30, 200, 250);
+            } else if (severity === 'warning') {
+                document.getElementById('viol-evidence-tag').innerText = `AI DETECTED: GAZE AWAY [${time}]`;
+                document.getElementById('viol-evidence-tag').style.background = 'rgba(245, 158, 11, 0.8)';
+                ctx.strokeStyle = "rgba(245, 158, 11, 0.85)"; ctx.lineWidth = 4;
+                ctx.strokeRect(220, 30, 200, 250);
+            } else {
+                document.getElementById('viol-evidence-tag').innerText = `NORMAL STATE [${time}]`;
+                document.getElementById('viol-evidence-tag').style.background = 'rgba(16, 185, 129, 0.8)';
+            }
+        }
+
+        function exportCSV() {
+            let csvContent = "data:text/csv;charset=utf-8,\uFEFFThời gian,Phòng thi,Thí sinh,Hành vi phát hiện,Mức độ\n";
+            alertsList.forEach(a => {
+                csvContent += `${a.time},${a.roomId},${a.candId.toUpperCase()},"${a.message}",${a.severity}\n`;
+            });
+            const encodedUri = encodeURI(csvContent);
+            const link = document.createElement("a");
+            link.setAttribute("href", encodedUri);
+            link.setAttribute("download", `AI_Proctor_Report_${getTimestamp().replace(/:/g,'-')}.csv`);
+            document.body.appendChild(link);
+            link.click();
+            link.remove();
+        }
+
+        function printReport() {
+            window.print();
+        }
+
+        function startExam(roomId, numCands) {
+            roomsData[roomId].examStatus = "đang thi";
+            renderRoomListTable();
+            navigate('room-monitor-view', roomId);
+        }
+
+        function initRoomMonitor(roomId) {
+            document.getElementById('class-cctv-label').innerText =
+                'CAMERA TỔNG: ' + roomsData[roomId].name.toUpperCase();
+            const cCanvas = document.getElementById('class-cctv-canvas');
+            cCanvas.width = 800; cCanvas.height = 450;
+            initCandidatesGrid();
+        }
+
+        function initCctvOverviewGrid() {
+            const cctvGridContainer = document.getElementById("cctv-grid-container");
+            cctvGridContainer.innerHTML = "";
+            for (let rId in roomsData) {
+                const rData = roomsData[rId];
+                if (rData.examStatus !== 'đang thi') continue;
+
+                const card = document.createElement("div");
+                card.className = `cctv-card alarm-${rData.status}`;
+                card.id = `cctv-card-${rId}`;
+                card.onclick = () => navigate('room-monitor-view', rId);
+
+                card.innerHTML = `
+                    <div class="cctv-header">
+                        <div>
+                            <span class="cctv-title">${rData.name}</span>
+                            <div class="cctv-subject">${rData.subject}</div>
+                        </div>
+                        <span class="candidate-badge badge-${rData.status === 'danger' ? 'danger' : (rData.status === 'warning' ? 'warning' : 'safe')}" id="cctv-badge-${rId}">
+                            ${rData.status.toUpperCase()}
+                        </span>
+                    </div>
+                    <div class="cctv-feed-box">
+                        <canvas class="cctv-canvas" id="cctv-canvas-${rId}"></canvas>
+                    </div>
+                `;
+                cctvGridContainer.appendChild(card);
+                const cv = document.getElementById(`cctv-canvas-${rId}`);
+                cv.width = 320; cv.height = 180;
+            }
+            updateGlobalStats();
+        }
+
+        function initCandidatesGrid() {
+            const candidatesGridContainer = document.getElementById("candidates-grid-container");
+            candidatesGridContainer.innerHTML = "";
+            for (let id in candidates) {
+                const cand = candidates[id];
+                const card = document.createElement("div");
+                card.className = `candidate-card status-${cand.status}`;
+                card.id = `card-${cand.id}`;
+                card.onclick = () => selectCandidate(cand.id);
+
+                let sourceTag = (window.isWebcamActive && cand.id.endsWith('_1')) ? "REAL_WEBCAM" : "WEBCAM";
+
+                card.innerHTML = `
+                    <div class="candidate-header">
+                        <div class="cand-info">
+                            <span class="cand-id">${cand.id.toUpperCase()}</span>
+                            <span class="cand-name">${cand.name}</span>
+                        </div>
+                        <span class="candidate-badge badge-${cand.status}" id="badge-${cand.id}">${cand.status.toUpperCase()}</span>
+                    </div>
+                    <div class="cand-feed-box">
+                        <canvas class="candidate-canvas" id="canvas-${cand.id}"></canvas>
+                        <div class="hud-overlay">
+                            <div class="hud-top"><span style="${sourceTag==='REAL_WEBCAM'?'color:var(--success); font-weight:bold;':''}">${sourceTag}</span><span>30 FPS</span></div>
+                            <div class="hud-bottom">
+                                <span>AI_TRACKING</span>
+                                <div class="susp-score-mini">
+                                    <span class="susp-dot" id="susp-dot-${cand.id}" style="background: var(--success);"></span>
+                                    <span id="susp-val-${cand.id}">${cand.suspicion}%</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                `;
+                candidatesGridContainer.appendChild(card);
+                const cv = document.getElementById(`canvas-${cand.id}`);
+                cv.width = 240; cv.height = 180;
+            }
+        }
+
+        function selectCandidate(id) {
+            if (selectedCandidateId) {
+                const prevCard = document.getElementById(`card-${selectedCandidateId}`);
+                if (prevCard) prevCard.classList.remove("active-selected");
+            }
+            
+            selectedCandidateId = id;
+            const newCard = document.getElementById(`card-${id}`);
+            if (newCard) newCard.classList.add("active-selected");
+
+            const cand = candidates[id];
+            document.getElementById("det-cand-id").innerText = cand.id.toUpperCase();
+            document.getElementById("det-cand-name").innerText = cand.name;
+            document.getElementById("det-cand-exam").innerText = `SBD: ${cand.sbd}`;
+            
+            updateDetailPanelUI(cand);
+        }
+
+        function updateDetailPanelUI(cand) {
+            const statusBadge = document.getElementById("det-cand-status-badge");
+            statusBadge.innerText = cand.status.toUpperCase();
+            statusBadge.className = `candidate-badge badge-${cand.status}`;
+            document.getElementById("det-suspicion-txt").innerText = `${cand.suspicion}%`;
+            document.getElementById("det-suspicion-fill").style.width = `${cand.suspicion}%`;
+            
+            const logsContainer = document.getElementById("det-cand-logs");
+            logsContainer.innerHTML = "";
+            cand.logs.forEach(l => {
+                const entry = document.createElement("div");
+                entry.className = "cand-log-entry";
+                let textClass = "";
+                if (l.type === "critical") textClass = "danger";
+                else if (l.type === "warning") textClass = "warning";
+                
+                entry.innerHTML = `<span class="cand-log-time">${l.time}</span><span class="cand-log-txt ${textClass}">${l.text}</span>`;
+                logsContainer.appendChild(entry);
+            });
+            logsContainer.scrollTop = logsContainer.scrollHeight;
+        }
+
+        function drawClassroomCctv(ctx, w, h, roomId, tickOffset) {
+            if (window.isCctvWebcamActive && window.cctvImgElement && window.cctvImgElement.complete && window.cctvImgElement.naturalWidth > 0) {
+                ctx.drawImage(window.cctvImgElement, 0, 0, w, h);
+                ctx.fillStyle = "rgba(255, 255, 255, 0.7)";
+                ctx.font = "8px 'JetBrains Mono'";
+                ctx.fillText(`REAL_CCTV | LIVE`, 10, 15);
+                return;
+            }
+
+            ctx.fillStyle = "#06050e";
+            ctx.fillRect(0, 0, w, h);
+
+            const rData = roomsData[roomId];
+            if (rData.examStatus === 'chưa thi') return;
+
+            ctx.strokeStyle = "rgba(99, 102, 241, 0.08)";
+            ctx.lineWidth = 1;
+            const bx = w * 0.25; const by = h * 0.2; const bw = w * 0.5; const bh = h * 0.5;
+            ctx.strokeRect(bx, by, bw, bh);
+            ctx.beginPath();
+            ctx.moveTo(bx, by); ctx.lineTo(0, 0); ctx.moveTo(bx + bw, by); ctx.lineTo(w, 0);
+            ctx.moveTo(bx, by + bh); ctx.lineTo(0, h); ctx.moveTo(bx + bw, by + bh); ctx.lineTo(w, h);
+            ctx.stroke();
+
+            const studentPositions = [
+                { x: w * 0.28, y: h * 0.45, scale: 0.65 },
+                { x: w * 0.5,  y: h * 0.45, scale: 0.65 },
+                { x: w * 0.72, y: h * 0.45, scale: 0.65 },
+                { x: w * 0.2,  y: h * 0.65, scale: 0.85 },
+                { x: w * 0.8,  y: h * 0.65, scale: 0.85 },
+                { x: w * 0.5,  y: h * 0.65, scale: 0.85 },
+                { x: w * 0.15, y: h * 0.85, scale: 1.1 },
+                { x: w * 0.85, y: h * 0.85, scale: 1.1 },
+                { x: w * 0.35, y: h * 0.85, scale: 1.1 },
+                { x: w * 0.65, y: h * 0.85, scale: 1.1 }
+            ];
+
+            const cKeys = Object.keys(rData.candidates);
+
+            cKeys.forEach((cKey, index) => {
+                if (index >= studentPositions.length) return;
+                const pos = studentPositions[index];
+                const cand = rData.candidates[cKey];
+
+                const px = pos.x; const py = pos.y; const sc = pos.scale;
+                const offsetMove = Math.sin((tickOffset + index * 40) * 0.03) * 1.5;
+
+                ctx.fillStyle = "rgba(16, 185, 129, 0.1)";
+                ctx.strokeStyle = "rgba(16, 185, 129, 0.3)";
+                ctx.fillRect(px - 25*sc, py - 35*sc + offsetMove, 50*sc, 30*sc);
+                ctx.strokeRect(px - 25*sc, py - 35*sc + offsetMove, 50*sc, 30*sc);
+
+                ctx.save();
+                ctx.translate(px, py + offsetMove);
+
+                ctx.strokeStyle = "rgba(255, 255, 255, 0.15)";
+                ctx.lineWidth = 1.5 * sc;
+                ctx.beginPath();
+                ctx.moveTo(-15 * sc, 20 * sc);
+                ctx.bezierCurveTo(-10 * sc, 5 * sc, 10 * sc, 5 * sc, 15 * sc, 20 * sc);
+                ctx.stroke();
+
+                ctx.strokeStyle = cand.status === "danger" ? "#ef4444" : (cand.status === "warning" ? "#f59e0b" : "#6366f1");
+                ctx.beginPath();
+                ctx.arc(0, -5, 8 * sc, 0, Math.PI * 2);
+                ctx.stroke();
+                ctx.restore();
+
+                if (cand.status !== "safe") {
+                    ctx.strokeStyle = cand.status === "danger" ? "rgba(239,68,68,0.7)" : "rgba(245,158,11,0.7)";
+                    const boxW = 40 * sc; const boxH = 50 * sc;
+                    ctx.strokeRect(px - boxW/2, py - boxH/2 + offsetMove - 10, boxW, boxH);
+                }
+            });
+
+            ctx.fillStyle = "rgba(99, 102, 241, 0.03)";
+            const sweepY = (tickOffset * 1.2) % h;
+            ctx.fillRect(0, sweepY, w, 3);
+            
+            ctx.fillStyle = "rgba(255, 255, 255, 0.5)";
+            ctx.font = "8px 'JetBrains Mono'";
+            ctx.fillText(`CCTV_OVERVIEW | LIVE`, 10, 15);
+        }
+
+        function drawCandidateCanvas(canvas, cand, tick) {
+            const ctx = canvas.getContext("2d");
+            const w = canvas.width; const h = canvas.height;
+
+            if (window.isWebcamActive && cand.id.endsWith('_1')) {
+                if (cand.imgElement && cand.imgElement.complete && cand.imgElement.naturalWidth > 0) {
+                    ctx.drawImage(cand.imgElement, 0, 0, w, h);
+                } else {
+                    const videoEl = document.getElementById('real-webcam');
+                    if (videoEl.readyState >= 3) { 
+                        ctx.drawImage(videoEl, 0, 0, w, h);
+                    } else {
+                        ctx.fillStyle = "#000"; ctx.fillRect(0, 0, w, h);
+                    }
+                }
+            } else {
+                ctx.fillStyle = "#0a0a14";
+                ctx.fillRect(0, 0, w, h);
+
+                cand.ticks = (cand.ticks || 0) + 1;
+                const headAngle = Math.sin(cand.ticks * 0.03) * 3;
+                
+                ctx.save();
+                ctx.translate(w/2, h/2 + 25);
+                ctx.rotate(headAngle * Math.PI / 180);
+
+                ctx.strokeStyle = "rgba(255,255,255,0.12)";
+                ctx.lineWidth = 1.5;
+                ctx.beginPath();
+                ctx.moveTo(-50, 40); ctx.quadraticCurveTo(-30, 0, -15, 0);
+                ctx.lineTo(15, 0); ctx.quadraticCurveTo(30, 0, 50, 40);
+                ctx.stroke();
+
+                ctx.strokeStyle = cand.status === "danger" ? "#ef4444" : (cand.status === "warning" ? "#f59e0b" : "rgba(99,102,241,0.8)");
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                ctx.arc(0, -30, 25, 0, Math.PI * 2);
+                ctx.stroke();
+
+                ctx.fillStyle = "rgba(255,255,255,0.8)";
+                ctx.beginPath(); ctx.arc(-10, -35, 2, 0, Math.PI*2); ctx.fill();
+                ctx.beginPath(); ctx.arc(10, -35, 2, 0, Math.PI*2); ctx.fill();
+                
+                ctx.strokeStyle = "rgba(99,102,241,0.3)";
+                ctx.lineWidth = 0.5;
+                ctx.beginPath(); ctx.moveTo(-18, -35); ctx.lineTo(18, -35); ctx.stroke();
+                ctx.beginPath(); ctx.moveTo(0, -55); ctx.lineTo(0, -5); ctx.stroke();
+                
+                ctx.restore();
+            }
+
+            if (!(window.isWebcamActive && cand.id.endsWith('_1'))) {
+                if (cand.status === "danger") {
+                    ctx.strokeStyle = "rgba(239, 68, 68, 0.85)";
+                    ctx.lineWidth = 2;
+                    ctx.strokeRect(w/2 - 40, h/2 - 60, 80, 100);
+                    ctx.fillStyle = "#ef4444"; ctx.font = "bold 9px 'JetBrains Mono'";
+                    ctx.fillText("CRITICAL: PHONE", w/2 - 40, h/2 - 65);
+                } else if (cand.status === "warning") {
+                    ctx.strokeStyle = "rgba(245, 158, 11, 0.85)";
+                    ctx.lineWidth = 2;
+                    ctx.strokeRect(w/2 - 40, h/2 - 60, 80, 100);
+                    ctx.fillStyle = "#f59e0b"; ctx.font = "bold 9px 'JetBrains Mono'";
+                    ctx.fillText("WARNING: GAZE", w/2 - 40, h/2 - 65);
+                }
+            }
+        }
+
+        function drawDetailFrontCanvas() {
+            if (!selectedCandidateId || !currentRoomId) return;
+            const cand = candidates[selectedCandidateId];
+            if (!cand) return;
+
+            const w = detCanvasFront.width;
+            const h = detCanvasFront.height;
+
+            if (window.isWebcamActive && cand.id.endsWith('_1')) {
+                if (cand.imgElement && cand.imgElement.complete && cand.imgElement.naturalWidth > 0) {
+                    ctxFront.drawImage(cand.imgElement, 0, 0, w, h);
+                } else {
+                    const videoEl = document.getElementById('real-webcam');
+                    if (videoEl.readyState >= 3) {
+                        ctxFront.drawImage(videoEl, 0, 0, w, h);
+                    } else {
+                        ctxFront.fillStyle = "#000"; ctxFront.fillRect(0,0,w,h);
+                    }
+                }
+            } else {
+                ctxFront.fillStyle = "#04030d";
+                ctxFront.fillRect(0, 0, w, h);
+
+                ctxFront.save();
+                ctxFront.translate(w/2, h/2 + 20);
+                const headAngle = Math.sin(cand.ticks * 0.02) * 5;
+                ctxFront.rotate(headAngle * Math.PI / 180);
+
+                ctxFront.strokeStyle = cand.status === "danger" ? "#ef4444" : (cand.status === "warning" ? "#f59e0b" : "#6366f1");
+                ctxFront.lineWidth = 2.5;
+                ctxFront.beginPath(); ctxFront.arc(0, -35, 45, 0, Math.PI*2); ctxFront.stroke();
+
+                ctxFront.strokeStyle = "rgba(99,102,241,0.2)";
+                ctxFront.lineWidth = 0.5;
+                for (let a=0; a<Math.PI*2; a+=Math.PI/6) {
+                    ctxFront.beginPath(); ctxFront.moveTo(0, -35); ctxFront.lineTo(Math.cos(a)*45, -35 + Math.sin(a)*45); ctxFront.stroke();
+                }
+
+                let gazeX = Math.sin(cand.ticks * 0.04) * 3;
+                let gazeY = Math.cos(cand.ticks * 0.03) * 1.5;
+                if (cand.status === "warning") { gazeX = -5; gazeY = 5; } 
+                else if (cand.status === "danger") { gazeX = 8; gazeY = 1; } 
+
+                ctxFront.fillStyle = "#fff";
+                ctxFront.beginPath(); ctxFront.arc(-18, -45, 6, 0, Math.PI*2); ctxFront.fill();
+                ctxFront.beginPath(); ctxFront.arc(18, -45, 6, 0, Math.PI*2); ctxFront.fill();
+                
+                ctxFront.fillStyle = cand.status === "safe" ? "var(--success)" : "var(--danger)";
+                ctxFront.beginPath(); ctxFront.arc(-18 + gazeX, -45 + gazeY, 3, 0, Math.PI*2); ctxFront.fill();
+                ctxFront.beginPath(); ctxFront.arc(18 + gazeX, -45 + gazeY, 3, 0, Math.PI*2); ctxFront.fill();
+                ctxFront.restore();
+            }
+
+            ctxFront.strokeStyle = cand.status === "safe" ? "rgba(16,185,129,0.5)" : (cand.status === "danger" ? "rgba(239,68,68,0.8)" : "rgba(245,158,11,0.8)");
+            ctxFront.lineWidth = 2;
+            ctxFront.strokeRect(w/2 - 70, h/2 - 75, 140, 150);
+        }
+
+        function drawDetailScreenCanvas() {
+             if (!selectedCandidateId || !currentRoomId) return;
+             const cand = candidates[selectedCandidateId];
+             if (!cand) return;
+             
+             const ctx = ctxScreen;
+             const w = detCanvasScreen.width;
+             const h = detCanvasScreen.height;
+             
+             if (cand.screenImage) {
+                 if (!cand.screenImgElement) {
+                     cand.screenImgElement = new Image();
+                 }
+                 if (cand.screenImgElement.src !== cand.screenImage) {
+                     cand.screenImgElement.src = cand.screenImage;
+                 }
+                 if (cand.screenImgElement.complete && cand.screenImgElement.naturalWidth > 0) {
+                     ctx.drawImage(cand.screenImgElement, 0, 0, w, h);
+                     if (cand.status === "danger") {
+                         ctx.fillStyle = "rgba(239, 68, 68, 0.2)";
+                         ctx.fillRect(0,0,w,h);
+                         ctx.strokeStyle = "#ef4444"; ctx.lineWidth=3; ctx.strokeRect(0,0,w,h);
+                     }
+                     return;
+                 }
+             }
+             
+             ctx.fillStyle = "#1e1e1e"; 
+             ctx.fillRect(0,0,w,h);
+             
+             ctx.fillStyle = "#d4d4d4"; 
+             ctx.font = "12px 'JetBrains Mono'";
+             const lines = [
+                 `// Candidate: ${cand.id.toUpperCase()}`,
+                 "function solveExam() {", 
+                 "  let answer = fetchFromBrain();", 
+                 "  if (check(answer)) {",
+                 "    return true;",
+                 "  }",
+                 "}",
+                 "> Compiling..."
+             ];
+             
+             const offset = (cand.ticks || 0) % 20 > 10 ? 2 : 0;
+             lines.forEach((line, i) => ctx.fillText(line, 15, 30 + i*20 + offset));
+             
+             if (cand.status === "danger") {
+                 ctx.fillStyle = "rgba(239, 68, 68, 0.2)";
+                 ctx.fillRect(0,0,w,h);
+                 ctx.strokeStyle = "#ef4444"; ctx.lineWidth=3; ctx.strokeRect(0,0,w,h);
+             }
+        }
+
+        function animate() {
+            ticksGlobal++;
+            if (currentRoomId === null) {
+                for (let rId in roomsData) {
+                    const canvas = document.getElementById(`cctv-canvas-${rId}`);
+                    if (canvas && roomsData[rId].examStatus === 'đang thi') {
+                        drawClassroomCctv(canvas.getContext("2d"), canvas.width, canvas.height, rId, ticksGlobal);
+                    }
+                }
+            } else {
+                const classCctv = document.getElementById("class-cctv-canvas");
+                if (classCctv) drawClassroomCctv(classCctv.getContext("2d"), classCctv.width, classCctv.height, currentRoomId, ticksGlobal);
+
+                for (let id in candidates) {
+                    const canvas = document.getElementById(`canvas-${id}`);
+                    if (canvas) drawCandidateCanvas(canvas, candidates[id], ticksGlobal);
+                }
+                drawDetailFrontCanvas();
+                drawDetailScreenCanvas();
+            }
+            requestAnimationFrame(animate);
+        }
+
+        function triggerRandomIncident() {
+            const activeRooms = Object.keys(roomsData).filter(rId => roomsData[rId].examStatus === 'đang thi');
+            if (activeRooms.length === 0) {
+                setTimeout(triggerRandomIncident, 4000); return;
+            }
+
+            const randomRoomId = activeRooms[Math.floor(Math.random() * activeRooms.length)];
+            const room = roomsData[randomRoomId];
+            
+            const candIds = Object.keys(room.candidates);
+            if (candIds.length === 0) {
+                 setTimeout(triggerRandomIncident, 4000); return;
+            }
+            const randomCandId = candIds[Math.floor(Math.random() * candIds.length)];
+            const cand = room.candidates[randomCandId];
+
+            if (cand.status === "danger") {
+                setTimeout(triggerRandomIncident, 4000); return;
+            }
+
+            if (cand.status === "safe") {
+                const isDanger = Math.random() < 0.4;
+                if (isDanger) {
+                    cand.status = "danger"; cand.suspicion = 95;
+                    appendAlert(randomRoomId, cand.id, "Phát hiện sử dụng thiết bị cấm (Điện thoại).", "critical");
+                } else {
+                    cand.status = "warning"; cand.suspicion = 75;
+                    appendAlert(randomRoomId, cand.id, "Hướng mắt bất thường, rời khỏi màn hình làm bài.", "warning");
+                }
+            } else {
+                cand.status = "safe"; cand.suspicion = 0;
+                appendAlert(randomRoomId, cand.id, "Đã khôi phục trạng thái làm bài bình thường.", "info");
+            }
+
+            if (currentRoomId === randomRoomId) {
+                updateCardVisuals(cand);
+            }
+            updateGlobalStats();
+            setTimeout(triggerRandomIncident, Math.random() * 8000 + 6000);
+        }
+
+        function appendAlert(roomId, candId, message, severity) {
+            const time = getTimestamp();
+            if (roomsData[roomId].candidates[candId]) {
+                roomsData[roomId].candidates[candId].logs.push({ time, text: message, type: severity });
+            }
+
+            alertsList.unshift({ time, roomId, candId, message, severity });
+            if (alertsList.length > 50) alertsList.pop();
+
+            const alertItem = document.createElement("div");
+            alertItem.className = `alert-item severity-${severity}`;
+            alertItem.onclick = () => {
+                if (currentRoomId !== roomId) navigate('room-monitor-view', roomId);
+                selectCandidate(candId);
+            };
+            
+            let prefix = severity === "critical" ? "CRITICAL" : (severity === "warning" ? "WARNING" : "INFO");
+            let titleClass = severity === "critical" ? "alert-title-danger" : (severity === "warning" ? "alert-title-warning" : "alert-title-info");
+
+            let candName = candId.toUpperCase();
+
+            alertItem.innerHTML = `
+                <span class="alert-time">${time}</span>
+                <div class="alert-content">
+                    <div class="alert-header">
+                        <span class="${titleClass}">[${prefix}] ${roomId}-${candName}</span>
+                    </div>
+                    <span class="alert-desc">${message}</span>
+                </div>
+            `;
+            const alertsListEl = document.getElementById("alerts-list");
+            alertsListEl.insertBefore(alertItem, alertsListEl.firstChild);
+            while (alertsListEl.childNodes.length > 8) {
+                alertsListEl.removeChild(alertsListEl.lastChild);
+            }
+            
+            document.getElementById("alert-count").innerText = `${Math.min(alertsList.length, 8)} sự kiện mới nhất`;
+
+            if (selectedCandidateId === candId && currentRoomId === roomId) {
+                updateDetailPanelUI(candidates[candId]);
+            }
+
+            if (document.getElementById('alerts-view').classList.contains('active-view')) {
+                renderAlertsTable();
+            }
+        }
+
+        function updateGlobalStats() {
+            let total = 0, safe = 0, warning = 0, danger = 0;
+            let totalAlerts = alertsList.length;
+            let trackedCandidates = 0;
+            
+            for (let rId in roomsData) {
+                total++; let rData = roomsData[rId];
+                if (rData.examStatus === 'chưa thi') {
+                    rData.status = "safe";
+                    const card = document.getElementById(`cctv-card-${rId}`);
+                    if (card) card.className = `cctv-card alarm-${rData.status}`;
+                    continue; 
+                }
+
+                let hasDanger = false, hasWarning = false;
+                for (let cId in rData.candidates) {
+                    if (rData.candidates[cId].status === "danger") { hasDanger = true; trackedCandidates++; }
+                    if (rData.candidates[cId].status === "warning") { hasWarning = true; trackedCandidates++; }
+                }
+                
+                if (hasDanger) { rData.status = "danger"; danger++; }
+                else if (hasWarning) { rData.status = "warning"; warning++; }
+                else { rData.status = "safe"; safe++; }
+
+                const badge = document.getElementById(`cctv-badge-${rId}`);
+                if (badge) {
+                    badge.innerText = rData.status.toUpperCase();
+                    badge.className = `candidate-badge badge-${rData.status === 'danger' ? 'danger' : (rData.status === 'warning' ? 'warning' : 'safe')}`;
+                }
+                const card = document.getElementById(`cctv-card-${rId}`);
+                if (card) card.className = `cctv-card alarm-${rData.status}`;
+            }
+
+            document.getElementById("global-total-rooms").innerText = total;
+            document.getElementById("global-safe-rooms").innerText = safe;
+            document.getElementById("global-warning-rooms").innerText = warning;
+            document.getElementById("global-danger-rooms").innerText = danger;
+            
+            document.getElementById("dash-total-alerts").innerText = totalAlerts;
+            document.getElementById("dash-tracked-cands").innerText = trackedCandidates;
+            const activeRooms = total - Object.keys(roomsData).filter(rId => roomsData[rId].examStatus === 'chưa thi').length;
+            const safeRate = activeRooms > 0 ? Math.round((safe / activeRooms) * 100) : 100;
+            const safeRateEl = document.getElementById("dash-safe-rate");
+            safeRateEl.innerText = `${safeRate}%`;
+            safeRateEl.style.color = safeRate > 80 ? "var(--success)" : (safeRate > 50 ? "var(--warning)" : "var(--danger)");
+        }
+
+        function updateCardVisuals(cand) {
+            const card = document.getElementById(`card-${cand.id}`);
+            if (card) card.className = `candidate-card status-${cand.status} ${selectedCandidateId === cand.id ? 'active-selected' : ''}`;
+            const badge = document.getElementById(`badge-${cand.id}`);
+            if (badge) { badge.innerText = cand.status.toUpperCase(); badge.className = `candidate-badge badge-${cand.status}`; }
+            const suspVal = document.getElementById(`susp-val-${cand.id}`);
+            if (suspVal) suspVal.innerText = `${cand.suspicion}%`;
+            const suspDot = document.getElementById(`susp-dot-${cand.id}`);
+            if (suspDot) suspDot.style.background = cand.status === "warning" ? "var(--warning)" : (cand.status === "danger" ? "var(--danger)" : "var(--success)");
+        }
+
+        function sendWarningVoice() {
+            if (!selectedCandidateId || !currentRoomId) return;
+            const cand = candidates[selectedCandidateId];
+            
+            const warningText = `Thí sinh ${cand.sbd}, yêu cầu tập trung làm bài thi.`;
+            cand.logs.push({ time: getTimestamp(), text: `Phát cảnh cáo thoại: "${warningText}"`, type: "system" });
+            updateDetailPanelUI(cand);
+            
+            if ('speechSynthesis' in window) {
+                const utterance = new SpeechSynthesisUtterance(warningText);
+                utterance.lang = 'vi-VN';
+                window.speechSynthesis.speak(utterance);
+            } else {
+                showToast("Trình duyệt không hỗ trợ phát giọng nói.");
+            }
+        }
+
+        function disqualifyCandidate() {
+            if (!selectedCandidateId || !currentRoomId) return;
+            const cand = candidates[selectedCandidateId];
+            cand.status = "danger"; cand.suspicion = 100;
+            appendAlert(currentRoomId, selectedCandidateId, "ĐÌNH CHỈ THI bởi Giám thị.", "critical");
+            updateCardVisuals(cand); updateGlobalStats();
+        }
+
+        function resetCandidateStatus() {
+            if (!selectedCandidateId || !currentRoomId) return;
+            const cand = candidates[selectedCandidateId];
+            cand.status = "safe"; cand.suspicion = 0;
+            appendAlert(currentRoomId, selectedCandidateId, "Đã giải trừ nghi vấn. Trạng thái an toàn.", "info");
+            updateCardVisuals(cand); updateGlobalStats();
+        }
+
+        function getTimestamp() { return new Date().toTimeString().split(' ')[0]; }
+
+        function toggleDropdown(id) {
+            document.getElementById(id).classList.toggle('show');
+        }
+        
+        document.addEventListener('click', function(e) {
+            const dropdown = document.getElementById('userDropdown');
+            const wrapper = document.querySelector('.user-dropdown-wrapper');
+            if (dropdown && wrapper && !wrapper.contains(e.target)) dropdown.classList.remove('show');
+        });
+
+        function openModal(id) { document.getElementById(id).classList.add('show'); }
+        function closeModal(id) { document.getElementById(id).classList.remove('show'); }
+
+        function submitPasswordChange() {
+            const current = document.getElementById('current-password').value.trim();
+            const next = document.getElementById('new-password').value.trim();
+            const confirm = document.getElementById('confirm-password').value.trim();
+
+            if (!current || !next || !confirm) {
+                showToast('Vui lòng điền đầy đủ các trường.');
+                return;
+            }
+            if (next !== confirm) {
+                showToast('Mật khẩu mới và xác nhận không khớp.');
+                return;
+            }
+            if (next.length < 8) {
+                showToast('Mật khẩu mới cần ít nhất 8 ký tự.');
+                return;
+            }
+            if (next === current) {
+                showToast('Mật khẩu mới phải khác mật khẩu hiện tại.');
+                return;
+            }
+            closeModal('changePasswordModal');
+            document.getElementById('change-password-form').reset();
+            showToast('Mật khẩu đã được cập nhật thành công.');
+        }
+
+        function renderReportsTable() {
+            const tbody = document.getElementById('reports-table-body');
+            tbody.innerHTML = `
+                <tr><td>Phòng A101</td><td style="text-align:center;">45</td><td style="text-align:center;">5</td><td style="text-align:center;">11%</td><td style="text-align:center;"><span class="alert-tag tag-high">Cần chú ý</span></td></tr>
+                <tr><td>Phòng B202</td><td style="text-align:center;">12</td><td style="text-align:center;">0</td><td style="text-align:center;">0%</td><td style="text-align:center;"><span class="alert-tag" style="color:var(--success); border:1px solid var(--success);">Tốt</span></td></tr>
+                <tr><td>Phòng C305</td><td style="text-align:center;">28</td><td style="text-align:center;">2</td><td style="text-align:center;">7%</td><td style="text-align:center;"><span class="alert-tag tag-medium">Bình thường</span></td></tr>
+            `;
+        }
+
+        function renderExamTable() {
+            const tbody = document.getElementById('exam-table-body');
+            tbody.innerHTML = `
+                <tr><td>SE102_CK</td><td>Cuối kỳ Thiết Kế PM</td><td>Công nghệ phần mềm</td><td>15/06/2026</td><td>07:30</td><td style="text-align:center;">90</td><td style="text-align:center;">4</td><td style="text-align:center;"><span class="alert-tag" style="color:var(--success); border:1px solid var(--success);">Sắp diễn ra</span></td><td style="text-align:center; white-space:nowrap;"><button class="filter-btn" style="padding:0.3rem 0.6rem; font-size:0.7rem;" onclick="showToast('Mở form sửa kỳ thi...')">Sửa</button></td></tr>
+                <tr><td>CS101_GK</td><td>Giữa kỳ Cấu Trúc Dữ Liệu</td><td>Khoa học máy tính</td><td>01/06/2026</td><td>13:00</td><td style="text-align:center;">60</td><td style="text-align:center;">6</td><td style="text-align:center;"><span class="alert-tag tag-high">Đã kết thúc</span></td><td style="text-align:center; white-space:nowrap;"><button class="filter-btn" style="padding:0.3rem 0.6rem; font-size:0.7rem;" onclick="showToast('Mở form sửa kỳ thi...')">Sửa</button></td></tr>
+            `;
+        }
+
+        function renderCandidateTable() {
+            const tbody = document.getElementById('candidate-table-body');
+            tbody.innerHTML = candidateManagementList.map(candidate => {
+                const statusColor = candidate.statusClass === 'success' ? 'var(--success)' : candidate.statusClass === 'danger' ? 'var(--danger)' : 'var(--text-secondary)';
+                const warningColor = candidate.warning > 0 ? 'var(--warning)' : 'inherit';
+                const violationColor = candidate.violation > 0 ? 'var(--danger)' : 'inherit';
+                return `
+                    <tr>
+                        <td>${candidate.id}</td>
+                        <td>${candidate.name}</td>
+                        <td>${candidate.className}</td>
+                        <td>${candidate.room}</td>
+                        <td style="text-align:center;"><span style="color:${statusColor}">${candidate.status}</span></td>
+                        <td style="text-align:center; color:${warningColor}">${candidate.warning}</td>
+                        <td style="text-align:center; color:${violationColor}">${candidate.violation}</td>
+                        <td style="text-align:center;"><button class="filter-btn" style="padding:0.3rem 0.6rem; font-size:0.7rem;" onclick="showToast('Đang mở hồ sơ thí sinh...')">Hồ sơ</button></td>
+                    </tr>`;
+            }).join('');
+        }
+
+        function renderProctorTable() {
+            const tbody = document.getElementById('proctor-table-body');
+            tbody.innerHTML = proctorManagementList.map(proctor => {
+                const statusColor = proctor.statusClass === 'success' ? 'var(--success)' : proctor.statusClass === 'danger' ? 'var(--danger)' : 'var(--text-secondary)';
+                return `
+                    <tr>
+                        <td>${proctor.id}</td>
+                        <td>${proctor.name}</td>
+                        <td>${proctor.phone}</td>
+                        <td>${proctor.room}</td>
+                        <td>${proctor.shift}</td>
+                        <td style="text-align:center;"><span style="color:${statusColor}">${proctor.status}</span></td>
+                        <td style="text-align:center;"><button class="filter-btn" style="padding:0.3rem 0.6rem; font-size:0.7rem;" onclick="showToast('Mở form đổi ca trực...')">Đổi ca</button></td>
+                    </tr>`;
+            }).join('');
+        }
+
+        function addCandidate() {
+            const mssv = document.getElementById('candidate-mssv').value.trim();
+            const name = document.getElementById('candidate-name').value.trim();
+            const className = document.getElementById('candidate-class').value.trim();
+            const email = document.getElementById('candidate-email').value.trim();
+            const room = document.getElementById('candidate-room').value.trim();
+
+            if (!mssv || !name || !className || !email || !room) {
+                showToast('Vui lòng điền đầy đủ các trường.');
+                return;
+            }
+
+            candidateManagementList.unshift({
+                id: mssv,
+                name,
+                className: className,
+                room,
+                status: 'Đang thi',
+                statusClass: 'success',
+                warning: 0,
+                violation: 0
+            });
+
+            renderCandidateTable();
+            closeModal('candidateModal');
+            showToast('Đã thêm thí sinh!');
+            document.getElementById('candidate-mssv').value = '';
+            document.getElementById('candidate-name').value = '';
+            document.getElementById('candidate-class').value = '';
+            document.getElementById('candidate-email').value = '';
+            document.getElementById('candidate-room').value = '';
+        }
+
+        function addProctor() {
+            const id = document.getElementById('proctor-id').value.trim();
+            const name = document.getElementById('proctor-name').value.trim();
+            const email = document.getElementById('proctor-email').value.trim();
+            const phone = document.getElementById('proctor-phone').value.trim();
+            const room = document.getElementById('proctor-room').value.trim();
+            const shift = document.getElementById('proctor-shift').value.trim();
+
+            if (!id || !name || !email || !phone || !room || !shift) {
+                showToast('Vui lòng điền đầy đủ các trường.');
+                return;
+            }
+
+            proctorManagementList.unshift({
+                id,
+                name,
+                email,
+                phone,
+                room,
+                shift,
+                status: 'Đang trực',
+                statusClass: 'success'
+            });
+
+            renderProctorTable();
+            closeModal('proctorModal');
+            showToast('Đã thêm giám thị!');
+            document.getElementById('proctor-id').value = '';
+            document.getElementById('proctor-name').value = '';
+            document.getElementById('proctor-email').value = '';
+            document.getElementById('proctor-phone').value = '';
+            document.getElementById('proctor-room').value = '';
+            document.getElementById('proctor-shift').value = '';
+        }
+
+
+        function renderLogsTable() {
+            const tbody = document.getElementById('logs-table-body');
+            tbody.innerHTML = `
+                <tr><td style="font-family:var(--font-mono)">${getTimestamp()}</td><td>Admin</td><td>Cập nhật cấu hình</td><td>AI Model</td><td style="text-align:center;"><span style="color:var(--success)">Thành công</span></td><td style="text-align:right;">192.168.1.5</td></tr>
+                <tr><td style="font-family:var(--font-mono)">10:15:22</td><td>System AI</td><td>Auto Đình chỉ thi</td><td>Thí sinh 22520005</td><td style="text-align:center;"><span style="color:var(--success)">Thành công</span></td><td style="text-align:right;">localhost</td></tr>
+                <tr><td style="font-family:var(--font-mono)">08:00:10</td><td>Admin</td><td>Đăng nhập</td><td>Tài khoản</td><td style="text-align:center;"><span style="color:var(--success)">Thành công</span></td><td style="text-align:right;">192.168.1.5</td></tr>
+            `;
+        }
+
+        setInterval(() => {
+            document.getElementById("live-clock").innerText = new Date().toLocaleTimeString('vi-VN');
+        }, 1000);
+
+        function updateAiConfig() {
+            const confEl = document.getElementById('ai-conf-threshold');
+            const maxDispEl = document.getElementById('ai-max-disappeared');
+            const lookAwayEl = document.getElementById('ai-look-away-time');
+            const gazeEl = document.getElementById('ai-gaze-ratio');
+            const faceEl = document.getElementById('ai-face-conf');
+            
+            if (!confEl || !maxDispEl || !lookAwayEl || !gazeEl || !faceEl) return;
+            
+            const confVal = parseFloat(confEl.value);
+            const maxDispVal = parseFloat(maxDispEl.value);
+            const lookAwayVal = parseFloat(lookAwayEl.value);
+            const gazeVal = parseFloat(gazeEl.value);
+            const faceVal = parseFloat(faceEl.value);
+
+            window.aiConfig.confThreshold = confVal / 100;
+            window.aiConfig.maxDisappearedTime = maxDispVal;
+            window.aiConfig.lookAwayTime = lookAwayVal;
+            window.aiConfig.gazeRatio = gazeVal / 100;
+            window.aiConfig.faceConf = faceVal / 100;
+
+            document.getElementById('ai-conf-threshold-lbl').innerText = `${confVal}%`;
+            document.getElementById('ai-gaze-ratio-lbl').innerText = `${gazeVal}%`;
+            document.getElementById('ai-face-conf-lbl').innerText = `${faceVal}%`;
+        }
+
+        function restoreDefaultAiConfig() {
+            const confEl = document.getElementById('ai-conf-threshold');
+            const maxDispEl = document.getElementById('ai-max-disappeared');
+            const lookAwayEl = document.getElementById('ai-look-away-time');
+            const gazeEl = document.getElementById('ai-gaze-ratio');
+            const faceEl = document.getElementById('ai-face-conf');
+            
+            if (confEl) confEl.value = 35;
+            if (maxDispEl) maxDispEl.value = 3;
+            if (lookAwayEl) lookAwayEl.value = 3;
+            if (gazeEl) gazeEl.value = 85;
+            if (faceEl) faceEl.value = 70;
+            
+            updateAiConfig();
+            showToast('Đã khôi phục thông số AI mặc định.');
+        }
+
+        window.onload = async () => {
+            navigate('cctv-overview-view');
+            animate();
+            updateAiConfig();
+            await enumerateDashboardCameras();
+            await startWebcam();
+            setTimeout(triggerRandomIncident, 5000);
+        };
+
+        if (navigator.mediaDevices && navigator.mediaDevices.addEventListener) {
+            navigator.mediaDevices.addEventListener('devicechange', async () => {
+                console.log("Thiết bị camera thay đổi. Đang quét lại...");
+                const oldCctvDeviceId = document.getElementById("cctv-camera-select")?.value;
+                await enumerateDashboardCameras();
+                const newCctvDeviceId = document.getElementById("cctv-camera-select")?.value;
+                
+                // Tự động nhận diện và kích hoạt camera mới (như Iriun được kết nối)
+                if (!window.isWebcamActive || !window.isCctvWebcamActive || oldCctvDeviceId !== newCctvDeviceId) {
+                    console.log("Tự động nhận diện cấu hình camera mới...");
+                    await startWebcam();
+                }
+            });
+        }
+    </script>
+</body>
+</html>
