@@ -4,235 +4,98 @@ Hệ thống giám sát phòng thi thông minh sử dụng mô hình học sâu 
 
 ---
 
-# 🚀 Hướng Dẫn Chạy Hệ Thống
+## 🚀 Hướng Dẫn Chạy Hệ Thống
 
 Hệ thống hỗ trợ chạy tự động qua file script trên hệ điều hành Windows hoặc cài đặt thủ công.
 
----
-
-## ⚡ Cách 1: Chạy Tự Động (Khuyên Dùng trên Windows)
-
-1. Kích đúp vào file `run.bat` tại thư mục gốc của dự án.
-
+### Cách 1: Chạy Tự Động (Khuyên Dùng trên Windows)
+1. Kích đúp vào file **`run.bat`** tại thư mục gốc của dự án.
 2. Script sẽ tự động thực hiện các bước:
-
-   * Kiểm tra cài đặt Python
-   * Khởi tạo môi trường ảo Python (`.venv`) nếu chưa có
-   * Nâng cấp `pip`
-   * Tự động cài đặt toàn bộ thư viện trong `requirements.txt`
-   * Khởi động máy chủ Web Uvicorn
-
-3. Truy cập hệ thống tại:
-
-```text
-http://127.0.0.1:8000
-```
+   - Kiểm tra cài đặt Python.
+   - Khởi tạo môi trường ảo Python (`.venv`) nếu chưa có.
+   - Nâng cấp `pip` và tự động cài đặt toàn bộ thư viện cần thiết trong tệp `requirements.txt`.
+   - Khởi động máy chủ Web Uvicorn tại địa chỉ: [http://127.0.0.1:8000](http://127.0.0.1:8000)
+3. Mở trình duyệt Web và truy cập địa chỉ trên để sử dụng giao diện giám sát.
 
 ---
 
-## 🛠️ Cách 2: Cài Đặt và Chạy Thủ Công
+### Cách 2: Cài Đặt và Chạy Thủ Công (Mọi Hệ Điều Hành)
+Nếu không chạy bằng `run.bat`, bạn có thể thực hiện tuần tự các lệnh sau trong terminal/cmd:
 
-### 1. Tạo môi trường ảo
+1. **Tạo môi trường ảo:**v
+   ```bash
+   python -m venv .venv
+   ```
 
-```bash
-python -m venv .venv
-```
+2. **Kích hoạt môi trường ảo:**
+   * **Windows (cmd):** `.venv\Scripts\activate.bat`
+   * **Windows (PowerShell):** `.venv\Scripts\Activate.ps1`
+   * **Linux/macOS:** `source .venv/bin/activate`
 
----
+3. **Cài đặt thư viện:**
+   ```bash
+   pip install --upgrade pip
+   pip install -r requirements.txt
+   ```
 
-### 2. Kích hoạt môi trường ảo
-
-#### Windows CMD
-
-```bash
-.venv\Scripts\activate.bat
-```
-
-#### Windows PowerShell
-
-```bash
-.venv\Scripts\Activate.ps1
-```
-
-#### Linux/macOS
-
-```bash
-source .venv/bin/activate
-```
+4. **Chạy Uvicorn Web Server:**
+   ```bash
+   python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
+   ```
+5. Mở trình duyệt và truy cập: [http://127.0.0.1:8000](http://127.0.0.1:8000)
 
 ---
 
-### 3. Cài đặt thư viện
+## 🛠️ Các Chức Năng Chính Của Hệ Thống
 
-```bash
-pip install --upgrade pip
-pip install -r requirements.txt
-```
+Hệ thống cung cấp một bảng điều khiển giám sát trực quan (Premium Dashboard) với các tính năng vượt trội:
 
----
+### 1. Phân Tích Luồng Video Thời Gian Thực (WebSocket Streaming)
+- Thu nhận khung hình trực tiếp từ webcam của trình duyệt thí sinh, nén và truyền tải qua giao thức kết nối hai chiều **WebSocket** tốc độ cao.
+- Máy chủ backend xử lý khung hình bằng YOLOv8 và gửi lại khung hình đã vẽ nhãn kèm theo dữ liệu phân tích chỉ số thời gian thực với độ trễ cực thấp.
 
-### 4. Chạy Uvicorn Server
+### 2. Định Danh & Theo Dõi Thí Sinh (`id01`, `id02`,...)
+- Tích hợp thuật toán theo dõi đối tượng **Centroid Tracker** tự phát triển ở backend.
+- Tự động gán nhãn định danh duy nhất tăng dần cho từng thí sinh (`id01`, `id02`,...) dựa trên thứ tự xuất hiện của họ trong khung hình.
+- Có khả năng duy trì định danh của thí sinh ngay cả khi bị che khuất tạm thời hoặc mất dấu trong khoảng thời gian ngắn (~2.5 giây).
 
-```bash
-python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
-```
+### 3. Quản Lý Phiên Thi (Exam Session Control)
+- Cung cấp nút **Bắt Đầu Phiên Thi** trên bảng điều khiển. Nút này chỉ khả dụng khi camera đang giám sát.
+- Khi nhấn **Bắt Đầu Phiên Thi**: Hệ thống sẽ ghi nhận và khóa (lock) số lượng thí sinh hiện tại cùng vị trí tọa độ ban đầu của họ làm mốc tham chiếu giám sát.
+- Khi kết thúc bài thi, nhấn **Kết Thúc Phiên Thi** để đưa hệ thống về trạng thái giám sát tự do.
 
----
+### 4. Hệ Thống Phát Hiện Vi Phạm Thông Minh
+Khi phiên thi đang hoạt động, hệ thống liên tục thực hiện các kiểm tra an ninh sau:
+- **Thí sinh rời vị trí**: Cảnh báo ngay lập tức nếu thí sinh đã được khóa ban đầu biến mất khỏi khung hình.
+- **Di chuyển khỏi ghế ngồi**: Tính toán khoảng cách dịch chuyển của thí sinh so với vị trí ban đầu khi khóa phiên. Nếu khoảng cách vượt ngưỡng an toàn **100 pixels**, hệ thống sẽ kích hoạt cảnh báo thí sinh rời vị trí ngồi làm bài.
+- **Phát hiện người lạ/xâm nhập**: Cảnh báo tức thì nếu có bất kỳ người thứ hai/người lạ (`id` mới chưa được khóa ban đầu) xuất hiện trong khung hình.
+- **Phát hiện vật dụng cấm**: Tự động nhận diện các vật thể cấm bao gồm **Điện thoại di động (Cell phone)**, **Sách/Tài liệu (Book)**, và **Laptop/Màn hình ngoài (Laptop)**.
 
-### 5. Truy cập hệ thống
+### 5. Cảnh Báo Âm Thanh & Giọng Nói AI (TTS)
+- **Còi báo động**: Phát tiếng bíp với tần số thay đổi tùy mức độ nghiêm trọng của vi phạm.
+- **Giọng nói cảnh báo AI (Vietnamese Voice)**: Tự động phát âm thanh cảnh báo bằng giọng nói tiếng Việt tự nhiên chỉ rõ lỗi và ID thí sinh vi phạm (ví dụ: *"Cảnh báo. Thí sinh id01 đã rời khỏi vị trí!"* hoặc *"Phát hiện điện thoại di động!"*).
+- Cung cấp các nút công tắc bật/tắt Còi báo động và Giọng nói AI linh hoạt trên bảng điều khiển.
 
-```text
-http://127.0.0.1:8000
-```
-
----
-
-# 🛠️ Các Chức Năng Chính Của Hệ Thống
-
-## 1. Phân Tích Video Thời Gian Thực
-
-* Streaming webcam qua WebSocket
-* Phân tích khung hình bằng YOLOv8
-* Hiển thị detection theo thời gian thực
-* Độ trễ thấp
-
----
-
-## 2. Theo Dõi & Định Danh Thí Sinh
-
-* Sử dụng thuật toán Centroid Tracker
-* Gán ID tự động (`id01`, `id02`, ...)
-* Theo dõi liên tục kể cả khi che khuất ngắn hạn
+### 6. Thống Kê & Chỉ Số Nghi Vấn (Suspicion Index)
+- Tính toán chỉ số nghi vấn theo thời gian thực từ **0% đến 100%** dựa trên mức độ nghiêm trọng của hành vi vi phạm.
+- Vẽ biểu đồ đường trực quan thể hiện biến thiên mức độ nghi vấn của thí sinh giúp giám thị dễ dàng xem lại lịch sử phiên thi.
+- Cung cấp khung **Lịch Sử Vi Phạm (Logs)** hiển thị chi tiết thời gian và loại lỗi vi phạm được sắp xếp theo thời gian thực.
 
 ---
 
-## 3. Quản Lý Phiên Thi
-
-* Bắt đầu phiên thi
-* Khóa vị trí ban đầu của thí sinh
-* Kết thúc phiên thi
-* Theo dõi trạng thái phiên thi realtime
-
----
-
-## 4. Hệ Thống Phát Hiện Vi Phạm
-
-### 🚨 Các hành vi được phát hiện
-
-* Rời khỏi vị trí
-* Di chuyển quá xa vị trí ban đầu
-* Xuất hiện người lạ
-* Sử dụng điện thoại
-* Mang sách/tài liệu
-* Phát hiện laptop hoặc màn hình phụ
-
----
-
-## 5. Hệ Thống Cảnh Báo AI
-
-### 🔊 Bao gồm:
-
-* Còi cảnh báo
-* Giọng nói AI tiếng Việt
-* Đọc ID thí sinh vi phạm
-* Tùy chỉnh bật/tắt âm thanh
-
-Ví dụ:
-
-```text
-"Cảnh báo. Thí sinh id01 đã rời khỏi vị trí!"
-```
-
----
-
-## 6. Suspicion Index
-
-* Chỉ số nghi vấn từ `0% - 100%`
-* Biểu đồ realtime
-* Lịch sử vi phạm
-* Log theo thời gian thực
-
----
-
-# 🧠 Công Nghệ Sử Dụng
-
-| Công Nghệ  | Vai Trò             |
-| ---------- | ------------------- |
-| YOLOv8     | Object Detection    |
-| FastAPI    | Backend API         |
-| WebSocket  | Real-time Streaming |
-| OpenCV     | Xử lý ảnh           |
-| JavaScript | Frontend            |
-| HTML/CSS   | Dashboard UI        |
-| Uvicorn    | ASGI Server         |
-
----
-
-# 📁 Cấu Trúc Thư Mục Dự Án
+## 📁 Cấu Trúc Thư Mục Dự Án
 
 ```text
 model/
 │
 ├── app/
 │   ├── templates/
-│   │   └── index.html
-│   └── main.py
+│   │   └── index.html      # Giao diện giám sát Web Dashboard (HTML/CSS/JS)
+│   └── main.py             # Backend API, WebSocket, CandidateTracker & YOLOv8
 │
-├── .venv/
-├── requirements.txt
-├── run.bat
-├── yolov8n.pt
-└── README.md
+├── .venv/                  # Thư mục môi trường ảo Python (được tạo tự động)
+├── requirements.txt        # Danh sách thư viện Python phụ thuộc
+├── run.bat                 # Script chạy nhanh hệ thống trên Windows
+├── yolov8n.pt              # File trọng số mô hình YOLOv8 Nano
+└── README.md               # Tài liệu hướng dẫn sử dụng (tệp tin này)
 ```
-
----
-
-# 📦 Cài Đặt Thư Viện Chính
-
-```bash
-pip install ultralytics fastapi uvicorn opencv-python websockets numpy
-```
-
----
-
-# 🎯 Mô Hình AI Sử Dụng
-
-* YOLOv8 Nano (`yolov8n.pt`)
-* Pretrained trên COCO Dataset
-* Fine-tune cho môi trường phòng thi
-
----
-
-# 📸 Các Đối Tượng Được Nhận Diện
-
-| Đối Tượng  | Trạng Thái |
-| ---------- | ---------- |
-| Person     | ✅          |
-| Cell Phone | ✅          |
-| Book       | ✅          |
-| Laptop     | ✅          |
-
----
-
-# 🔥 Hướng Phát Triển Trong Tương Lai
-
-* Face Recognition
-* Pose Estimation
-* Multi-camera Tracking
-* Transformer-based Action Recognition
-* AI Report Generation
-* Cloud Deployment
-* Database Logging
-* Anti-Spoofing Detection
-
----
-
-# 👨‍💻 Tác Giả
-
-Developed by **Huỳnh Châu Kiệt**
-
----
-
-# ⭐ License
-
-This project is developed for educational and research purposes.
