@@ -71,12 +71,7 @@ Khi phiên thi đang hoạt động, hệ thống liên tục thực hiện các
 - **Phát hiện người lạ/xâm nhập**: Cảnh báo tức thì nếu có bất kỳ người thứ hai/người lạ (`id` mới chưa được khóa ban đầu) xuất hiện trong khung hình.
 - **Phát hiện vật dụng cấm**: Tự động nhận diện các vật thể cấm bao gồm **Điện thoại di động (Cell phone)**, **Sách/Tài liệu (Book)**, và **Laptop/Màn hình ngoài (Laptop)**.
 
-### 5. Cảnh Báo Âm Thanh & Giọng Nói AI (TTS)
-- **Còi báo động**: Phát tiếng bíp với tần số thay đổi tùy mức độ nghiêm trọng của vi phạm.
-- **Giọng nói cảnh báo AI (Vietnamese Voice)**: Tự động phát âm thanh cảnh báo bằng giọng nói tiếng Việt tự nhiên chỉ rõ lỗi và ID thí sinh vi phạm (ví dụ: *"Cảnh báo. Thí sinh id01 đã rời khỏi vị trí!"* hoặc *"Phát hiện điện thoại di động!"*).
-- Cung cấp các nút công tắc bật/tắt Còi báo động và Giọng nói AI linh hoạt trên bảng điều khiển.
-
-### 6. Thống Kê & Chỉ Số Nghi Vấn (Suspicion Index)
+### 5. Thống Kê & Chỉ Số Nghi Vấn (Suspicion Index)
 - Tính toán chỉ số nghi vấn theo thời gian thực từ **0% đến 100%** dựa trên mức độ nghiêm trọng của hành vi vi phạm.
 - Vẽ biểu đồ đường trực quan thể hiện biến thiên mức độ nghi vấn của thí sinh giúp giám thị dễ dàng xem lại lịch sử phiên thi.
 - Cung cấp khung **Lịch Sử Vi Phạm (Logs)** hiển thị chi tiết thời gian và loại lỗi vi phạm được sắp xếp theo thời gian thực.
