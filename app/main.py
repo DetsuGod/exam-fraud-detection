@@ -5,6 +5,12 @@ import json
 import base64
 import math
 import numpy as np
+import traceback
+import asyncio
+try:
+    import easyocr
+except ImportError:
+    easyocr = None
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request
 from fastapi.responses import HTMLResponse, StreamingResponse
@@ -64,7 +70,8 @@ def get_or_create_session_dir() -> str:
         month_str = now.strftime("%m")
         year_str = now.strftime("%Y")
         
-        log_base_dir = r"D:\tài liệu\ie101\model\LOG phiên"
+        
+        log_base_dir = os.path.join(os.path.dirname(BASE_DIR), "LOG_phien")
         os.makedirs(log_base_dir, exist_ok=True)
         
         prefix = f"ngày {day_str} tháng {month_str} năm {year_str} phiên "
@@ -632,12 +639,22 @@ custom_model = None
 face_cascade = None
 eye_cascade = None
 profile_cascade = None
+ocr_reader = None
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup
-    global model, custom_model, face_cascade, eye_cascade, profile_cascade
+    global model, custom_model, face_cascade, eye_cascade, profile_cascade, ocr_reader
     
+    # Initialize EasyOCR Reader in background
+    if easyocr is not None:
+        try:
+            # Initialize EasyOCR with only 'en' to improve accuracy per user request
+            ocr_reader = easyocr.Reader(['en'], gpu=True)
+            print("[INIT] EasyOCR loaded successfully with GPU.")
+        except Exception as e:
+            print(f"[STARTUP] EasyOCR initialization failed: {e}")
+
     # 1. Load base model (yolov8n.pt) - Normal, lightweight CPU model
     print("[STARTUP] Loading normal base model (yolov8n.pt)...")
     model = YOLO("yolov8n.pt")
@@ -746,8 +763,8 @@ app.add_middleware(
 )
 
 # Mount static assets for the React Exam Screen
-EXAM_ASSETS_DIR = "D:/tài liệu/ie101/model/UI and module/Exam screen/dist/assets"
-if os.path.exists(EXAM_ASSETS_DIR):
+EXAM_ASSETS_DIR = os.path.join(os.path.dirname(BASE_DIR), "UI and module", "Exam screen", "dist", "assets")
+if os.path.isdir(EXAM_ASSETS_DIR):
     app.mount("/assets", StaticFiles(directory=EXAM_ASSETS_DIR), name="exam_assets")
     print(f"[INIT] Mounted React Exam Screen assets from: {EXAM_ASSETS_DIR}")
 else:
@@ -778,13 +795,18 @@ async def get_admin_dashboard(request: Request):
     return await get_dashboard(request)
 
 @app.get("/exam", response_class=HTMLResponse)
-async def get_exam_dashboard(request: Request):
+@app.get("/exams", response_class=HTMLResponse)
+@app.get("/exam/{id}", response_class=HTMLResponse)
+@app.get("/login", response_class=HTMLResponse)
+@app.get("/result", response_class=HTMLResponse)
+@app.get("/admin", response_class=HTMLResponse)
+async def get_exam_dashboard(request: Request, id: str = None):
     """
     Serves the newly integrated React Exam Screen application.
     """
     try:
         print("[ROUTE] Accessing Exam Page...")
-        exam_html_path = "D:/tài liệu/ie101/model/UI and module/Exam screen/dist/index.html"
+        exam_html_path = os.path.join(os.path.dirname(BASE_DIR), "UI and module", "Exam screen", "dist", "index.html")
         if os.path.exists(exam_html_path):
             with open(exam_html_path, "r", encoding="utf-8") as f:
                 content = f.read()
@@ -800,14 +822,14 @@ from fastapi.responses import FileResponse
 
 @app.get("/favicon.svg", include_in_schema=False)
 async def get_favicon():
-    favicon_path = "D:/tài liệu/ie101/model/UI and module/Exam screen/dist/favicon.svg"
+    favicon_path = os.path.join(os.path.dirname(BASE_DIR), "UI and module", "Exam screen", "dist", "favicon.svg")
     if os.path.exists(favicon_path):
         return FileResponse(favicon_path)
     return HTMLResponse(status_code=404)
 
 @app.get("/icons.svg", include_in_schema=False)
 async def get_icons():
-    icons_path = "D:/tài liệu/ie101/model/UI and module/Exam screen/dist/icons.svg"
+    icons_path = os.path.join(os.path.dirname(BASE_DIR), "UI and module", "Exam screen", "dist", "icons.svg")
     if os.path.exists(icons_path):
         return FileResponse(icons_path)
     return HTMLResponse(status_code=404)
@@ -833,6 +855,9 @@ class StudentWebcamProctorState:
 
 student_proctor_states = {}
 
+# Global Exam Config from Admin Dashboard
+global_exam_mode = "THUC_HANH"
+global_keyword_blacklist = ["chatgpt", "zalo", "gemini", "messenger"]
 
 @app.websocket("/ws/exam")
 async def websocket_exam(websocket: WebSocket):
@@ -851,7 +876,14 @@ async def websocket_exam(websocket: WebSocket):
         while True:
             message = await websocket.receive_text()
             data = json.loads(message)
-            
+            # Handle config updates from dashboard
+            if data.get("action") == "UPDATE_CONFIG":
+                global global_exam_mode, global_keyword_blacklist
+                global_exam_mode = data.get("mode", "THUC_HANH")
+                global_keyword_blacklist = data.get("blacklist", ["chatgpt", "zalo", "gemini", "messenger"])
+                print(f"[CONFIG] Updated exam mode: {global_exam_mode}, Blacklist: {global_keyword_blacklist}")
+                continue
+                
             # Keep track of which student is connected
             if "student_id" in data and data["student_id"]:
                 student_id = data["student_id"].lower()
@@ -913,7 +945,13 @@ async def websocket_exam(websocket: WebSocket):
                                     faces = profiles
                             
                             if len(faces) == 0:
-                                state.out_of_frame_frames += 1
+                                is_black_screen = (np.mean(frame) < 5.0 or np.std(frame) < 2.0)
+                                if is_black_screen:
+                                    violations.append("CẢNH BÁO: Thí sinh bị lỗi/mất kết nối Camera (Màn hình đen)!")
+                                    state.out_of_frame_frames = 0
+                                else:
+                                    state.out_of_frame_frames += 1
+                                    
                                 state.glance_frames = max(0, state.glance_frames - 1)
                                 state.head_turn_frames = max(0, state.head_turn_frames - 1)
                                 state.head_turn_start_time = None
@@ -1046,14 +1084,14 @@ async def websocket_exam(websocket: WebSocket):
                             if num_phones > 0:
                                 suspicion_index = 95
                             elif state.out_of_frame_frames > 25:
-                                suspicion_index = 85
+                                suspicion_index = 85 if global_exam_mode == "TRAC_NGHIEM" else 30
                                 violations.append("Thí sinh rời khỏi vị trí làm bài!")
                             elif state.head_turn_frames > 15:
-                                suspicion_index = 75
+                                suspicion_index = 75 if global_exam_mode == "TRAC_NGHIEM" else 20
                             elif state.glance_frames > 15:
-                                suspicion_index = 50
+                                suspicion_index = 50 if global_exam_mode == "TRAC_NGHIEM" else 15
                             elif num_books > 0:
-                                suspicion_index = 45
+                                suspicion_index = 45 if global_exam_mode == "TRAC_NGHIEM" else 10
                             
                             sid_low = student_id.lower()
                             if sid_low in pending_exam_violations and pending_exam_violations[sid_low]:
@@ -1119,36 +1157,122 @@ async def websocket_exam(websocket: WebSocket):
                 student_screens[student_id] = image
                 
             # Log and handle exam violations
-            if event_type in ["BLUR", "VISIBILITY_CHANGE", "COPY_DETECTED", "SCREEN_SHARE_STOPPED"]:
+            if event_type in ["BLUR", "VISIBILITY_CHANGE", "COPY_DETECTED", "COPY_FRAME", "SCREEN_SHARE_STOPPED", "SHARE_VIOLATION"]:
                 msg = ""
-                if event_type == "BLUR":
-                    msg = "Thí sinh chuyển tab hoặc rời khỏi trang làm bài!"
-                elif event_type == "VISIBILITY_CHANGE":
-                    msg = "Thí sinh ẩn màn hình bài thi!"
-                elif event_type == "COPY_DETECTED":
-                    msg = "Thí sinh sao chép nội dung bài thi!"
-                elif event_type == "SCREEN_SHARE_STOPPED":
-                    msg = "CẢNH BÁO: Thí sinh dừng chia sẻ màn hình làm bài!"
+                matched_kw = None
+                matched_bboxes = []
+                
+                if event_type == "COPY_DETECTED":
+                    copied_text = data.get("copied_text", "").lower()
+                    for kw in global_keyword_blacklist:
+                        kw_strip = kw.strip().lower()
+                        if kw_strip and kw_strip in copied_text:
+                            matched_kw = kw_strip
+                            break
+                elif event_type in ["COPY_FRAME", "BLUR", "VISIBILITY_CHANGE"]:
+                    if image and ocr_reader is not None:
+                        try:
+                            def run_ocr(base64_str):
+                                if "," in base64_str:
+                                    _, encoded = base64_str.split(",", 1)
+                                else:
+                                    encoded = base64_str
+                                img_bytes = base64.b64decode(encoded)
+                                img_np = np.frombuffer(img_bytes, dtype=np.uint8)
+                                frame_cv = cv2.imdecode(img_np, cv2.IMREAD_COLOR)
+                                
+                                # Bỏ tiền xử lý tương phản thủ công để tránh làm hỏng text trên nền tối (Dark mode)
+                                # EasyOCR tự có khả năng nhận diện rất tốt trên ảnh nguyên bản
+                                return ocr_reader.readtext(frame_cv, detail=1)
+                            
+                            ocr_results = await asyncio.to_thread(run_ocr, image)
+                            extracted_text = " ".join([res[1] for res in ocr_results]).lower()
+                            
+                            for kw in global_keyword_blacklist:
+                                kw_strip = kw.strip().lower()
+                                if kw_strip and kw_strip in extracted_text:
+                                    matched_kw = kw_strip
+                                    for res in ocr_results:
+                                        bbox, text, prob = res
+                                        text_lower = text.lower().replace(" ", "")
+                                        if kw_strip in text_lower or (text_lower in kw_strip and len(text_lower) >= 3):
+                                            x0 = min(p[0] for p in bbox)
+                                            y0 = min(p[1] for p in bbox)
+                                            x1 = max(p[0] for p in bbox)
+                                            y1 = max(p[1] for p in bbox)
+                                            matched_bboxes.append({"x0": int(x0), "y0": int(y0), "x1": int(x1), "y1": int(y1)})
+                                    break
+                        except Exception as ocr_err:
+                            print(f"[OCR ERROR] {ocr_err}")
+
+                if global_exam_mode == "TRAC_NGHIEM":
+                    if event_type == "SCREEN_SHARE_STOPPED":
+                        msg = "CẢNH BÁO: Thí sinh dừng chia sẻ màn hình làm bài!"
+                    elif event_type == "SHARE_VIOLATION":
+                        msg = "Thí sinh chia sẻ sai chế độ màn hình!"
+                    elif event_type == "COPY_DETECTED":
+                        msg = f"Thí sinh sao chép nội dung bài thi! (Từ khóa: '{matched_kw}')" if matched_kw else "Thí sinh sao chép nội dung bài thi!"
+                    elif event_type == "COPY_FRAME":
+                        msg = f"Phát hiện sao chép tài liệu CẤM: '{matched_kw}'" if matched_kw else "Thí sinh sao chép nội dung bài thi!"
+                    elif event_type == "BLUR":
+                        msg = f"Phát hiện xem tài liệu CẤM: '{matched_kw}'" if matched_kw else "Thí sinh chuyển tab hoặc rời khỏi trang làm bài!"
+                    elif event_type == "VISIBILITY_CHANGE":
+                        msg = f"Phát hiện xem tài liệu CẤM: '{matched_kw}'" if matched_kw else "Thí sinh ẩn màn hình bài thi!"
+                else: # THUC_HANH
+                    if event_type == "SCREEN_SHARE_STOPPED":
+                        msg = "CẢNH BÁO: Thí sinh dừng chia sẻ màn hình làm bài!"
+                    elif event_type == "SHARE_VIOLATION":
+                        msg = "Thí sinh chia sẻ sai chế độ màn hình!"
+                    elif event_type == "COPY_DETECTED":
+                        msg = f"Phát hiện copy TỪ KHÓA CẤM: '{matched_kw}'" if matched_kw else "Thí sinh có hành vi Sao chép (Copy)!"
+                    elif event_type == "COPY_FRAME":
+                        msg = f"Phát hiện copy TỪ KHÓA CẤM: '{matched_kw}'" if matched_kw else "Thí sinh có hành vi Sao chép (Copy)!"
+                    elif event_type == "BLUR":
+                        msg = f"Phát hiện xem tài liệu CẤM: '{matched_kw}'" if matched_kw else "Thí sinh rời trang làm bài"
+                    elif event_type == "VISIBILITY_CHANGE":
+                        msg = f"Phát hiện xem tài liệu CẤM: '{matched_kw}'" if matched_kw else "Thí sinh chuyển tab"
                 
                 if student_id and msg:
                     sid = student_id.lower()
                     if sid not in pending_exam_violations:
                         pending_exam_violations[sid] = []
-                    pending_exam_violations[sid].append({
+                    
+                    violation_obj = {
                         "event_type": event_type,
-                        "message": msg
-                    })
+                        "message": msg,
+                        "image": image,
+                        "bboxes": matched_bboxes if 'matched_bboxes' in locals() else []
+                    }
+                    
+                    pending_exam_violations[sid].append(violation_obj)
                     
                     other_sid = sid[2:] if sid.startswith("id") else f"id{sid}"
                     if other_sid not in pending_exam_violations:
                         pending_exam_violations[other_sid] = []
-                    pending_exam_violations[other_sid].append({
-                        "event_type": event_type,
-                        "message": msg
-                    })
+                    pending_exam_violations[other_sid].append(violation_obj)
                     print(f"[WS EXAM VIOLATION] Queued exam violation for {student_id}: {msg}")
                     
-                    # Save screenshot of exam violation to D:\tài liệu\ie101\model\LOG phiên\<session_folder>\<classroom>\<student_id>\Exam
+                    # Phát ngay cho Admin (tránh lỗi delay do trình duyệt throttle khi blur tab)
+                    admin_payload = {
+                        "event_type": "stream_frame",
+                        "student_id": student_id,
+                        "image": violation_obj["image"],
+                        "screen_image": None,
+                        "bboxes": violation_obj["bboxes"],
+                        "metrics": {
+                            "suspicion_index": 0,
+                            "violations": [f"EXAM_ALERT: {msg}"],
+                            "num_persons": 0, "num_phones": 0, "num_laptops": 0, "num_books": 0
+                        }
+                    }
+                    admin_message = json.dumps(admin_payload)
+                    for admin_ws in list(exam_admin_connections):
+                        try:
+                            await admin_ws.send_text(admin_message)
+                        except:
+                            exam_admin_connections.discard(admin_ws)
+                    
+                    # Save screenshot of exam violation to LOG_phien\<session_folder>\<classroom>\<student_id>\Exam
                     if image:
                         try:
                             session_dir = get_or_create_session_dir()
@@ -1182,6 +1306,27 @@ async def websocket_exam(websocket: WebSocket):
                     
     except WebSocketDisconnect:
         print(f"[WS EXAM] Disconnected role={role}, student_id={student_id}")
+        if role == "student" and student_id:
+            msg = "CẢNH BÁO: Thí sinh mất kết nối Trình duyệt làm bài (Tắt tab hoặc rớt mạng)!"
+            admin_payload = {
+                "event_type": "stream_frame",
+                "student_id": student_id,
+                "image": None,
+                "screen_image": None,
+                "bboxes": [],
+                "metrics": {
+                    "suspicion_index": 100,
+                    "violations": [f"EXAM_ALERT: {msg}"],
+                    "num_persons": 0, "num_phones": 0, "num_laptops": 0, "num_books": 0
+                }
+            }
+            admin_message = json.dumps(admin_payload)
+            for admin_ws in list(exam_admin_connections):
+                try:
+                    # using asyncio.create_task or await directly
+                    await admin_ws.send_text(admin_message)
+                except:
+                    pass
     finally:
         if role == "admin":
             exam_admin_connections.discard(websocket)
@@ -1229,6 +1374,14 @@ async def websocket_stream(websocket: WebSocket):
             # Receive data from client
             message = await websocket.receive_text()
             data = json.loads(message)
+            
+            # Handle config updates from dashboard
+            if data.get("action") == "UPDATE_CONFIG":
+                global global_exam_mode, global_keyword_blacklist
+                global_exam_mode = data.get("mode", "THUC_HANH")
+                global_keyword_blacklist = data.get("blacklist", ["chatgpt", "zalo", "gemini", "messenger"])
+                print(f"[CONFIG] Updated exam mode: {global_exam_mode}, Blacklist: {global_keyword_blacklist}")
+                continue
             
             # Extract frame data (base64 string) and settings
             frame_data = data.get("image") # format: data:image/jpeg;base64,...
@@ -1305,7 +1458,13 @@ async def websocket_stream(websocket: WebSocket):
                 
                 if len(faces) == 0:
                     # No candidate visible in frame
-                    out_of_frame_frames += 1
+                    is_black_screen = (np.mean(frame) < 5.0 or np.std(frame) < 2.0)
+                    if is_black_screen:
+                        violations.append("CẢNH BÁO: Thí sinh bị lỗi/mất kết nối Camera (Màn hình đen)!")
+                        out_of_frame_frames = 0
+                    else:
+                        out_of_frame_frames += 1
+                    
                     glance_frames = max(0, glance_frames - 1)
                     head_turn_frames = max(0, head_turn_frames - 1)
                     head_turn_start_time = None
@@ -1578,11 +1737,11 @@ async def websocket_stream(websocket: WebSocket):
                 if num_phones > 0:
                     suspicion_index = 100
                 elif any("quay đầu" in v or "liếc mắt" in v for v in violations):
-                    suspicion_index = 75
+                    suspicion_index = 75 if global_exam_mode == "TRAC_NGHIEM" else 20
                 elif num_laptops > 0 or num_books > 0 or any("Casio" in v for v in violations):
-                    suspicion_index = 60
+                    suspicion_index = 60 if global_exam_mode == "TRAC_NGHIEM" else 10
                 elif any("rời khỏi khung hình" in v for v in violations):
-                    suspicion_index = 40
+                    suspicion_index = 40 if global_exam_mode == "TRAC_NGHIEM" else 15
                 else:
                     suspicion_index = 0
                     
@@ -1796,12 +1955,14 @@ async def websocket_stream(websocket: WebSocket):
                 suspicion_index = 0
                 if num_phones > 0:
                     suspicion_index = 100
-                elif any("rời khỏi vị trí" in v or "người lạ" in v or "người khác" in v for v in violations):
+                elif any("người lạ" in v or "người khác" in v for v in violations):
                     suspicion_index = 90
+                elif any("rời khỏi vị trí" in v for v in violations):
+                    suspicion_index = 90 if global_exam_mode == "TRAC_NGHIEM" else 35
                 elif num_laptops > 0 or num_books > 0 or any("Casio" in v for v in violations):
-                    suspicion_index = 60
+                    suspicion_index = 60 if global_exam_mode == "TRAC_NGHIEM" else 15
                 elif num_persons == 0:
-                    suspicion_index = 40
+                    suspicion_index = 40 if global_exam_mode == "TRAC_NGHIEM" else 10
                 else:
                     suspicion_index = 0
             
@@ -1895,6 +2056,26 @@ async def websocket_stream(websocket: WebSocket):
             
     except WebSocketDisconnect:
         print("[WEBSOCKET] Client disconnected.")
+        if student_id:
+            msg = "CẢNH BÁO: Thí sinh mất kết nối Camera!"
+            admin_payload = {
+                "event_type": "stream_frame",
+                "student_id": student_id,
+                "image": None,
+                "screen_image": None,
+                "bboxes": [],
+                "metrics": {
+                    "suspicion_index": 100,
+                    "violations": [f"EXAM_ALERT: {msg}"],
+                    "num_persons": 0, "num_phones": 0, "num_laptops": 0, "num_books": 0
+                }
+            }
+            admin_message = json.dumps(admin_payload)
+            for admin_ws in list(exam_admin_connections):
+                try:
+                    await admin_ws.send_text(admin_message)
+                except:
+                    pass
     except Exception as e:
         print(f"[WEBSOCKET ERROR] Error: {e}")
         import traceback

@@ -228,7 +228,7 @@
         .v-detail-left { flex: 1; display: flex; flex-direction: column; gap: 1.5rem; }
         .v-detail-right { flex: 2; display: flex; flex-direction: column; }
         
-        .v-timeline-container { flex: 1; background: rgba(0,0,0,0.2); border-radius: 8px; padding: 1rem; overflow-y: auto; display: flex; flex-direction: column; gap: 1rem; border: 1px solid var(--glass-border); }
+        .v-timeline-container { flex: 1; background: rgba(0,0,0,0.2); border-radius: 8px; padding: 1rem; overflow-y: auto; max-height: 400px; display: flex; flex-direction: column; gap: 1rem; border: 1px solid var(--glass-border); }
         .v-timeline-item { position: relative; padding-left: 1.5rem; border-left: 2px solid var(--glass-border); }
         .v-timeline-dot { position: absolute; left: -6px; top: 0; width: 10px; height: 10px; border-radius: 50%; background: var(--accent-primary); }
         .v-timeline-dot.critical { background: var(--danger); box-shadow: 0 0 8px var(--danger); }
@@ -768,7 +768,21 @@
                     <div style="max-width: 680px; margin: 1.5rem auto; width: 100%;">
                         <div class="panel-card" style="padding: 2rem; border-radius: 16px; background: rgba(15, 12, 38, 0.6); border-color: rgba(99, 102, 241, 0.25);">
                             <div class="panel-title" style="font-size: 1.15rem; font-weight: 700; margin-bottom: 1.5rem; text-shadow: 0 0 10px rgba(99,102,241,0.5); color: #fff;">
-                                CẤU HÌNH THÔNG SỐ AI & NHẬN DIỆN KHUÔN MẶT
+                                CẤU HÌNH CHẾ ĐỘ THI & THÔNG SỐ AI
+                            </div>
+                            
+                            <div class="form-group" style="margin-bottom: 1.25rem; background: rgba(0,0,0,0.2); padding: 1rem; border-radius: 8px; border: 1px solid var(--glass-border);">
+                                <label class="form-label" style="font-size: 0.85rem; font-weight: 600; color: var(--accent-primary);">Chế độ thi</label>
+                                <select id="exam-mode-select" class="form-input" style="background: rgba(0,0,0,0.4); border: 1px solid var(--glass-border); padding: 0.5rem; font-size: 0.9rem;" onchange="toggleBlacklistInput(); updateAiConfig();">
+                                    <option value="TRAC_NGHIEM">Trắc nghiệm</option>
+                                    <option value="THUC_HANH">Thực hành</option>
+                                </select>
+                            </div>
+                            
+                            <div class="form-group" id="blacklist-config-container" style="margin-bottom: 1.5rem; display: block; background: rgba(0,0,0,0.2); padding: 1rem; border-radius: 8px; border: 1px solid var(--glass-border);">
+                                <label class="form-label" style="font-size: 0.85rem; font-weight: 600; color: var(--warning);">Từ khóa cấm (Keyword Blacklist)</label>
+                                <p style="font-size: 0.75rem; color: var(--text-secondary); margin-bottom: 0.5rem;">Các từ khóa phân cách bằng dấu phẩy. VD: chatgpt,zalo,gemini</p>
+                                <input type="text" id="ai-keyword-blacklist" class="form-input" value="chatgpt,zalo,gemini,messenger" style="background: rgba(0,0,0,0.4); border: 1px solid var(--glass-border);" oninput="updateAiConfig()">
                             </div>
                             
                             <div class="form-group" style="margin-bottom: 1.25rem;">
@@ -1366,20 +1380,10 @@
                         cand.imgElement = new Image();
                     }
                     cand.imgElement.src = frameSrc;
-                    cand.suspicion = metrics.suspicion_index;
+                    const nowSecs = getTimestampSeconds();
                     
-                    let oldStatus = cand.status;
-                    if (metrics.num_phones > 0 || metrics.suspicion_index >= 90) {
-                        cand.status = "danger";
-                    } else if (metrics.suspicion_index >= 40) {
-                        cand.status = "warning";
-                    } else {
-                        cand.status = "safe";
-                    }
-                    
+                    // Determine new alerts
                     if (metrics.violations && metrics.violations.length > 0) {
-                        const nowSecs = getTimestampSeconds();
-                        // Find correct roomId for this candidate
                         let candRoomId = currentRoomId;
                         for (let rId in roomsData) {
                             if (roomsData[rId].candidates && roomsData[rId].candidates[targetCandId]) {
@@ -1390,20 +1394,49 @@
                         metrics.violations.forEach(v => {
                             const alreadyLogged = cand.logs.some(log => log.text === v && (getTimestampSeconds(log.time) > nowSecs - 8));
                             if (!alreadyLogged) {
+                                const currentMode = document.getElementById('exam-mode-select') ? document.getElementById('exam-mode-select').value : 'THUC_HANH';
                                 let severity = "warning";
-                                if (v.includes("điện thoại") || v.includes("rời khỏi") || v.includes("người lạ")) {
+                                if (v.includes("[INFO]")) {
+                                    severity = "info";
+                                } else if (v.includes("điện thoại") || v.includes("người lạ") || v.includes("CẤM") || v.includes("rời khỏi")) {
                                     severity = "critical";
+                                } else if (v.includes("rời trang") || v.includes("không tập trung") || v.includes("sao chép") || v.includes("copy")) {
+                                    severity = currentMode === "THUC_HANH" ? "warning" : "critical";
                                 }
                                 if (candRoomId) {
-                                    appendAlert(candRoomId, cand.id, v, severity);
+                                    appendAlert(candRoomId, cand.id, v, severity, frameSrc, response.bboxes || []);
                                 } else {
-                                    // Fallback: log directly to candidate without room
                                     const time = getTimestamp();
-                                    cand.logs.push({ time, text: v, type: severity });
+                                    cand.logs.push({ time, text: v, type: severity, image: frameSrc, bboxes: response.bboxes || [] });
                                 }
                             }
                         });
                     }
+
+                    // Calculate status based on current frame AND recent logs (last 15 seconds)
+                    let currentSuspicion = metrics.suspicion_index || 0;
+                    let currentStatus = "safe";
+                    
+                    if (metrics.num_phones > 0 || currentSuspicion >= 90) {
+                        currentStatus = "danger";
+                    } else if (currentSuspicion >= 40) {
+                        currentStatus = "warning";
+                    }
+                    
+                    const recentLogs = cand.logs.filter(log => (nowSecs - getTimestampSeconds(log.time)) <= 15);
+                    const hasCritical = recentLogs.some(log => log.type === "critical" || log.type === "danger" || log.type === "exam_alert");
+                    const hasWarning = recentLogs.some(log => log.type === "warning");
+                    
+                    if (hasCritical) {
+                        currentStatus = "danger";
+                        currentSuspicion = Math.max(currentSuspicion, 95);
+                    } else if (hasWarning && currentStatus !== "danger") {
+                        currentStatus = "warning";
+                        currentSuspicion = Math.max(currentSuspicion, 75);
+                    }
+                    
+                    cand.status = currentStatus;
+                    cand.suspicion = currentSuspicion;
                     
                     updateCardVisuals(cand);
                     updateGlobalStats();
@@ -1710,22 +1743,27 @@
                             
                             const alreadyLogged = cand.logs.some(log => log.text === displayViolation && (getTimestampSeconds(log.time) > nowSecs - 8));
                             if (!alreadyLogged) {
+                                const currentMode = document.getElementById('exam-mode-select') ? document.getElementById('exam-mode-select').value : 'THUC_HANH';
                                 let severity = "warning";
-                                if (displayViolation.includes("điện thoại") || displayViolation.includes("rời khỏi") || displayViolation.includes("người lạ") || displayViolation.includes("dừng chia sẻ") || displayViolation.includes("CẢNH BÁO")) {
+                                if (displayViolation.includes("[INFO]")) {
+                                    severity = "info";
+                                } else if (displayViolation.includes("điện thoại") || displayViolation.includes("người lạ") || displayViolation.includes("dừng chia sẻ") || displayViolation.includes("CẢNH BÁO") || displayViolation.includes("CẤM") || displayViolation.includes("rời khỏi")) {
                                     severity = "critical";
+                                } else if (displayViolation.includes("rời trang") || displayViolation.includes("chuyển tab") || displayViolation.includes("ẩn trình duyệt") || displayViolation.includes("ẩn màn hình") || displayViolation.includes("sao chép") || displayViolation.toLowerCase().includes("copy")) {
+                                    severity = currentMode === "THUC_HANH" ? "warning" : "critical";
                                 }
                                 
                                 if (isExamAlert) {
                                     if (severity === "critical") {
                                         cand.status = "danger";
                                         cand.suspicion = Math.max(cand.suspicion, 95);
-                                    } else {
+                                    } else if (severity === "warning") {
                                         cand.status = "warning";
                                         cand.suspicion = Math.max(cand.suspicion, 75);
                                     }
                                 }
                                 
-                                appendAlert(foundRoomId, cand.id, displayViolation, severity);
+                                appendAlert(foundRoomId, cand.id, displayViolation, severity, (isExamAlert && response.screen_image) ? response.screen_image : (response.image || null), response.bboxes || []);
                             }
                         });
                     }
@@ -1937,16 +1975,25 @@
                     <td style="text-align: left;">${alert.message}</td>
                     <td style="text-align: center;">${tagHtml}</td>
                     <td class="actions-col" style="text-align: center;">
-                        <button class="filter-btn" style="padding: 0.3rem 0.6rem; font-size: 0.7rem; display: inline-block;" onclick="event.stopPropagation(); viewViolationDetail('${alert.roomId}', '${alert.candId}', '${alert.time}', '${alert.message}', '${alert.severity}')">Chi tiết</button>
+                        <button class="filter-btn" style="padding: 0.3rem 0.6rem; font-size: 0.7rem; display: inline-block;" onclick='event.stopPropagation(); viewViolationDetail("${alert.roomId}", "${alert.candId}", "${alert.time}")'>Chi tiết</button>
                     </td>
                 `;
                 tbody.appendChild(tr);
             });
         }
 
-        function viewViolationDetail(roomId, candId, time, message, severity) {
+        function viewViolationDetail(roomId, candId, time) {
             navigate('violation-detail-view');
-            const cand = roomsData[roomId].candidates[candId];
+            const cand = roomsData[roomId]?.candidates[candId] || candidates[candId];
+            if (!cand) return;
+            
+            const log = cand.logs.find(l => l.time === time);
+            if (!log) return;
+            
+            const message = log.text;
+            const severity = log.type;
+            const image = log.image;
+            const bboxes = log.bboxes;
             
             document.getElementById('viol-header-title').innerText = `Hồ sơ vi phạm ${roomId} - ${candId.toUpperCase()}`;
             document.getElementById('viol-room').innerText = roomId;
@@ -1964,45 +2011,61 @@
             const logsToRender = cand.logs.slice().reverse(); 
             logsToRender.forEach(log => {
                 let dotClass = '';
-                if(log.type === 'critical') dotClass = 'critical';
+                if(log.type === 'critical' || log.type === 'danger' || log.type === 'exam_alert') dotClass = 'critical';
                 else if(log.type === 'warning') dotClass = 'warning';
+                else if(log.type === 'info') dotClass = 'safe';
 
                 timelineContainer.innerHTML += `
-                    <div class="v-timeline-item">
+                    <div class="v-timeline-item" style="${log.image ? 'cursor:pointer;' : ''}" ${log.image ? `onclick='viewViolationDetail("${roomId}", "${candId}", "${log.time}")'` : ''}>
                         <div class="v-timeline-dot ${dotClass}"></div>
                         <div class="v-time">${log.time}</div>
-                        <div class="v-desc" style="color: ${log.type === 'critical' ? 'var(--danger)' : (log.type === 'warning' ? 'var(--warning)' : 'var(--text-primary)')}">${log.text}</div>
+                        <div class="v-desc" style="color: ${log.type === 'critical' ? 'var(--danger)' : (log.type === 'warning' ? 'var(--warning)' : 'var(--text-primary)')}">${log.text} ${log.image ? '📸' : ''}</div>
                     </div>
                 `;
             });
 
             const evidenceCanvas = document.getElementById('evidence-canvas');
-            evidenceCanvas.width = 640; evidenceCanvas.height = 360;
             const ctx = evidenceCanvas.getContext('2d');
             
-            ctx.fillStyle = '#0a0a14';
-            ctx.fillRect(0, 0, 640, 360);
-            
-            ctx.strokeStyle = "rgba(255,255,255,0.12)"; ctx.lineWidth = 3;
-            ctx.beginPath(); ctx.moveTo(200, 360); ctx.quadraticCurveTo(280, 150, 320, 150); ctx.quadraticCurveTo(360, 150, 440, 360); ctx.stroke();
-            ctx.beginPath(); ctx.arc(320, 100, 50, 0, Math.PI * 2); ctx.stroke();
-            ctx.fillStyle = "rgba(255,255,255,0.8)";
-            ctx.beginPath(); ctx.arc(300, 90, 4, 0, Math.PI*2); ctx.fill();
-            ctx.beginPath(); ctx.arc(340, 90, 4, 0, Math.PI*2); ctx.fill();
-
-            if (severity === 'critical') {
-                document.getElementById('viol-evidence-tag').innerText = `AI DETECTED: PHONE [${time}]`;
+            if (severity === 'critical' || severity === 'danger') {
+                document.getElementById('viol-evidence-tag').innerText = `CẢNH BÁO CAO [${time}]`;
                 document.getElementById('viol-evidence-tag').style.background = 'rgba(239, 68, 68, 0.8)';
-                ctx.strokeStyle = "rgba(239, 68, 68, 0.85)"; ctx.lineWidth = 4;
-                ctx.strokeRect(220, 30, 200, 250);
             } else if (severity === 'warning') {
-                document.getElementById('viol-evidence-tag').innerText = `AI DETECTED: GAZE AWAY [${time}]`;
+                document.getElementById('viol-evidence-tag').innerText = `NGHI NGỜ [${time}]`;
                 document.getElementById('viol-evidence-tag').style.background = 'rgba(245, 158, 11, 0.8)';
-                ctx.strokeStyle = "rgba(245, 158, 11, 0.85)"; ctx.lineWidth = 4;
-                ctx.strokeRect(220, 30, 200, 250);
             } else {
-                document.getElementById('viol-evidence-tag').innerText = `NORMAL STATE [${time}]`;
+                document.getElementById('viol-evidence-tag').innerText = `THÔNG TIN [${time}]`;
                 document.getElementById('viol-evidence-tag').style.background = 'rgba(16, 185, 129, 0.8)';
+            }
+            
+            if (image) {
+                const img = new Image();
+                img.onload = () => {
+                    evidenceCanvas.width = img.naturalWidth || 640;
+                    evidenceCanvas.height = img.naturalHeight || 360;
+                    ctx.drawImage(img, 0, 0);
+                    
+                    if (bboxes && bboxes.length > 0) {
+                        ctx.strokeStyle = "rgba(239, 68, 68, 0.85)";
+                        ctx.lineWidth = 4;
+                        ctx.fillStyle = "rgba(239, 68, 68, 0.2)";
+                        for (const bbox of bboxes) {
+                            const w = bbox.x1 - bbox.x0;
+                            const h = bbox.y1 - bbox.y0;
+                            ctx.fillRect(bbox.x0, bbox.y0, w, h);
+                            ctx.strokeRect(bbox.x0, bbox.y0, w, h);
+                        }
+                    }
+                };
+                img.src = image.startsWith('data:') ? image : 'data:image/jpeg;base64,' + image;
+            } else {
+                evidenceCanvas.width = 640; evidenceCanvas.height = 360;
+                ctx.fillStyle = '#0a0a14';
+                ctx.fillRect(0, 0, 640, 360);
+                ctx.fillStyle = "rgba(255,255,255,0.5)";
+                ctx.font = "20px Inter";
+                ctx.textAlign = "center";
+                ctx.fillText("Không có ảnh đính kèm", 320, 180);
             }
         }
 
@@ -2144,6 +2207,7 @@
                 let textClass = "";
                 if (l.type === "critical") textClass = "danger";
                 else if (l.type === "warning") textClass = "warning";
+                else if (l.type === "info") textClass = "safe";
                 
                 entry.innerHTML = `<span class="cand-log-time">${l.time}</span><span class="cand-log-txt ${textClass}">${l.text}</span>`;
                 logsContainer.appendChild(entry);
@@ -2454,28 +2518,22 @@
                          ctx.fillRect(0,0,w,h);
                          ctx.strokeStyle = "#ef4444"; ctx.lineWidth=3; ctx.strokeRect(0,0,w,h);
                      }
-                     return;
                  }
+                 // Đã từng nhận tín hiệu -> không vẽ placeholder, giữ nguyên frame cũ
+                 return;
              }
              
-             ctx.fillStyle = "#1e1e1e"; 
+             ctx.fillStyle = "#0d0d1a"; 
              ctx.fillRect(0,0,w,h);
              
-             ctx.fillStyle = "#d4d4d4"; 
-             ctx.font = "12px 'JetBrains Mono'";
-             const lines = [
-                 `// Candidate: ${cand.id.toUpperCase()}`,
-                 "function solveExam() {", 
-                 "  let answer = fetchFromBrain();", 
-                 "  if (check(answer)) {",
-                 "    return true;",
-                 "  }",
-                 "}",
-                 "> Compiling..."
-             ];
-             
-             const offset = (cand.ticks || 0) % 20 > 10 ? 2 : 0;
-             lines.forEach((line, i) => ctx.fillText(line, 15, 30 + i*20 + offset));
+             ctx.fillStyle = "rgba(255,255,255,0.25)";
+             ctx.font = "13px 'JetBrains Mono'";
+             ctx.textAlign = "center";
+             ctx.fillText("[ Chưa có tín hiệu màn hình ]", w/2, h/2 - 10);
+             ctx.font = "11px 'JetBrains Mono'";
+             ctx.fillStyle = "rgba(255,255,255,0.12)";
+             ctx.fillText("Đang chờ thí sinh chia sẻ màn hình...", w/2, h/2 + 12);
+             ctx.textAlign = "left";
              
              if (cand.status === "danger") {
                  ctx.fillStyle = "rgba(239, 68, 68, 0.2)";
@@ -2506,6 +2564,7 @@
             }
             requestAnimationFrame(animate);
         }
+
 
         function triggerRandomIncident() {
             const activeRooms = Object.keys(roomsData).filter(rId => roomsData[rId].examStatus === 'đang thi');
@@ -2548,14 +2607,14 @@
             setTimeout(triggerRandomIncident, Math.random() * 8000 + 6000);
         }
 
-        function appendAlert(roomId, candId, message, severity) {
+        function appendAlert(roomId, candId, message, severity, image = null, bboxes = []) {
             if (!roomId || !roomsData[roomId]) return;  // Guard: invalid roomId
             const time = getTimestamp();
             if (roomsData[roomId].candidates[candId]) {
-                roomsData[roomId].candidates[candId].logs.push({ time, text: message, type: severity });
+                roomsData[roomId].candidates[candId].logs.push({ time, text: message, type: severity, image, bboxes });
             }
 
-            alertsList.unshift({ time, roomId, candId, message, severity });
+            alertsList.unshift({ time, roomId, candId, message, severity, image, bboxes });
             if (alertsList.length > 50) alertsList.pop();
 
             const alertItem = document.createElement("div");
@@ -2563,6 +2622,7 @@
             alertItem.onclick = () => {
                 if (currentRoomId !== roomId) navigate('room-monitor-view', roomId);
                 selectCandidate(candId);
+                viewViolationDetail(roomId, candId, time);
             };
             
             let prefix = severity === "critical" ? "CRITICAL" : (severity === "warning" ? "WARNING" : "INFO");
@@ -2581,11 +2641,8 @@
             `;
             const alertsListEl = document.getElementById("alerts-list");
             alertsListEl.insertBefore(alertItem, alertsListEl.firstChild);
-            while (alertsListEl.childNodes.length > 8) {
-                alertsListEl.removeChild(alertsListEl.lastChild);
-            }
             
-            document.getElementById("alert-count").innerText = `${Math.min(alertsList.length, 8)} sự kiện mới nhất`;
+            document.getElementById("alert-count").innerText = `${alertsList.length} sự kiện mới nhất`;
 
             if (selectedCandidateId === candId && currentRoomId === roomId) {
                 updateDetailPanelUI(candidates[candId]);
@@ -2864,6 +2921,11 @@
             document.getElementById("live-clock").innerText = new Date().toLocaleTimeString('vi-VN');
         }, 1000);
 
+        function toggleBlacklistInput() {
+            const container = document.getElementById('blacklist-config-container');
+            container.style.display = 'block';
+        }
+
         function updateAiConfig() {
             const confEl = document.getElementById('ai-conf-threshold');
             const maxDispEl = document.getElementById('ai-max-disappeared');
@@ -2879,15 +2941,30 @@
             const gazeVal = parseFloat(gazeEl.value);
             const faceVal = parseFloat(faceEl.value);
 
+            const examMode = document.getElementById('exam-mode-select') ? document.getElementById('exam-mode-select').value : 'THUC_HANH';
+            const blacklistStr = document.getElementById('ai-keyword-blacklist') ? document.getElementById('ai-keyword-blacklist').value : 'chatgpt,zalo,gemini,messenger';
+            const blacklist = blacklistStr.split(',').map(s => s.trim()).filter(s => s.length > 0);
+
             window.aiConfig.confThreshold = confVal / 100;
             window.aiConfig.maxDisappearedTime = maxDispVal;
             window.aiConfig.lookAwayTime = lookAwayVal;
             window.aiConfig.gazeRatio = gazeVal / 100;
             window.aiConfig.faceConf = faceVal / 100;
+            window.aiConfig.examMode = examMode;
+            window.aiConfig.blacklist = blacklist;
 
             document.getElementById('ai-conf-threshold-lbl').innerText = `${confVal}%`;
             document.getElementById('ai-gaze-ratio-lbl').innerText = `${gazeVal}%`;
             document.getElementById('ai-face-conf-lbl').innerText = `${faceVal}%`;
+
+            // Broadcast config to backend
+            if (window.wsConnection && window.wsConnection.readyState === WebSocket.OPEN) {
+                window.wsConnection.send(JSON.stringify({
+                    action: 'UPDATE_CONFIG',
+                    mode: examMode,
+                    blacklist: blacklist
+                }));
+            }
         }
 
         function restoreDefaultAiConfig() {

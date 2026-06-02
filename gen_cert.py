@@ -65,7 +65,7 @@ with open(key_path, "wb") as f:
         serialization.NoEncryption(),
     ))
 
-print(f"[CERT] ✅ Certificate saved: {cert_path}")
-print(f"[CERT] ✅ Private key saved:  {key_path}")
+print(f"[CERT] [OK] Certificate saved: {cert_path}")
+print(f"[CERT] [OK] Private key saved:  {key_path}")
 print(f"\n[CERT] Students access via: https://{local_ip}:8001/")
 print("[CERT] They will see a security warning -> click 'Advanced' -> 'Proceed'")

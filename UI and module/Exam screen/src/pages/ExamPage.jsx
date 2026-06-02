@@ -56,12 +56,15 @@ export default function ExamPage() {
     return () => window.removeEventListener('beforeunload', handleBeforeUnload);
   }, []);
 
-  // Monitor screen sharing status
+  // Monitor media streams status
   const [screenShareActive, setScreenShareActive] = useState(true);
+  const [cameraActive, setCameraActive] = useState(true);
+
   useEffect(() => {
     if (!permissionsGranted) return;
 
     const checkStream = () => {
+      // Check Screen Share
       if (!window.__examScreenStream || window.__examScreenStream.getVideoTracks().length === 0) {
         setScreenShareActive(false);
       } else {
@@ -70,6 +73,18 @@ export default function ExamPage() {
           setScreenShareActive(false);
         } else {
           setScreenShareActive(true);
+        }
+      }
+
+      // Check Camera
+      if (!window.__examCameraStream || window.__examCameraStream.getVideoTracks().length === 0) {
+        setCameraActive(false);
+      } else {
+        const track = window.__examCameraStream.getVideoTracks()[0];
+        if (track.readyState !== 'live') {
+          setCameraActive(false);
+        } else {
+          setCameraActive(true);
         }
       }
     };
@@ -324,6 +339,43 @@ export default function ExamPage() {
                 }}
               >
                 Chia sẻ lại màn hình
+              </button>
+              <button className="btn-secondary" onClick={doSubmit}>
+                Nộp bài ngay
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Camera Loss Overlay */}
+      {!cameraActive && screenShareActive && (
+        <div className="confirm-overlay" style={{ zIndex: 1000, background: 'rgba(0,0,0,0.85)' }}>
+          <div className="confirm-dialog glass-card" style={{ borderLeft: '4px solid var(--color-danger)' }}>
+            <h3 style={{ color: 'var(--color-danger)', display: 'flex', alignItems: 'center', gap: '8px' }}>
+              ⚠️ CẢNH BÁO
+            </h3>
+            <p style={{ marginTop: '16px' }}>
+              Kết nối Camera của bạn đã bị ngắt. Để đảm bảo tính công bằng, hệ thống đã tạm dừng làm bài.
+            </p>
+            <p style={{ marginTop: '8px', color: 'var(--color-text-secondary)', fontSize: '0.9rem' }}>
+              Vui lòng <strong>kết nối lại Camera</strong> để tiếp tục, hoặc bài thi sẽ bị thu lại.
+            </p>
+            <div className="confirm-actions" style={{ marginTop: '24px' }}>
+              <button 
+                className="btn-primary" 
+                onClick={async () => {
+                  try {
+                    const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+                    window.__examCameraStream = stream;
+                    setCameraActive(true);
+                  } catch (e) {
+                    console.error("Camera connect failed", e);
+                    alert("Không thể kết nối Camera. Vui lòng cấp quyền trong trình duyệt.");
+                  }
+                }}
+              >
+                Kết nối lại Camera
               </button>
               <button className="btn-secondary" onClick={doSubmit}>
                 Nộp bài ngay

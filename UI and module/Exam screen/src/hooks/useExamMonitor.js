@@ -61,12 +61,12 @@ export default function useExamMonitor({ enabled = false, studentId = '' } = {})
 
     if (!video.videoWidth) return '';
 
-    const scale = 960 / video.videoWidth;
-    canvas.width = 960;
+    const scale = 1280 / video.videoWidth;
+    canvas.width = 1280;
     canvas.height = video.videoHeight * scale;
     const ctx = canvas.getContext('2d');
     ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-    return canvas.toDataURL('image/jpeg', 0.3);
+    return canvas.toDataURL('image/jpeg', 0.8);
   }, []);
 
   // ── Capture screenshot from webcam stream ──
@@ -283,7 +283,8 @@ export default function useExamMonitor({ enabled = false, studentId = '' } = {})
       const copiedText = window.getSelection().toString();
 
       // 1. Send COPY_DETECTED immediately
-      sendEvent({ event_type: 'COPY_DETECTED', copied_text: copiedText });
+      const image = captureFrame();
+      sendEvent({ event_type: 'COPY_DETECTED', copied_text: copiedText, image });
       recordViolation('COPY');
 
       // 2. Clear any previous copy frame interval
