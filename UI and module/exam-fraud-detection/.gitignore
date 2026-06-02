@@ -11,13 +11,8 @@ app/__pycache__/
 *.pyo
 *.pyd
 
-# Node
-node_modules/
-dist/
-
 # YOLO & Datasets
 dataset/
-data/
 runs/
 *.pt
 *.onnx
@@ -28,16 +23,3 @@ test_s3.jpg
 
 # Backups
 backups/
-
-# Logs
-LOG phiên/
-
-# Images
-*.jpg
-*.jpeg
-*.png
-*.gif
-*.bmp
-
-# Certificates and keys
-*.pem

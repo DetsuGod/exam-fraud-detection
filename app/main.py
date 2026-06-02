@@ -24,6 +24,59 @@ print(f"[INIT] Templates exists: {os.path.isdir(TEMPLATES_DIR)}")
 
 templates = Jinja2Templates(directory=TEMPLATES_DIR)
 
+import threading
+session_lock = threading.Lock()
+
+def get_student_classroom(student_id: str) -> str:
+    if not student_id:
+        return "B202"
+    student_id = student_id.lower()
+    # 1. Format: id<room>_<index>, e.g. idb202_1
+    if student_id.startswith("id") and "_" in student_id:
+        room_part = student_id.split("_")[0][2:]
+        if room_part:
+            return room_part.upper()
+    # 2. Mock student IDs to their respective classrooms as per dashboard
+    if "22520005" in student_id:
+        return "B202"
+    if "22520001" in student_id:
+        return "A101"
+    # 3. Format: <room>_<index>, e.g. b202_1
+    if "_" in student_id:
+        return student_id.split("_")[0].upper()
+    if "-" in student_id:
+        return student_id.split("-")[0].upper()
+    # Fallback default
+    return "B202"
+
+def get_or_create_session_dir() -> str:
+    global current_session_dir
+    if current_session_dir is not None:
+        return current_session_dir
+        
+    with session_lock:
+        if current_session_dir is not None:
+            return current_session_dir
+            
+        import datetime
+        now = datetime.datetime.now()
+        day_str = now.strftime("%d")
+        month_str = now.strftime("%m")
+        year_str = now.strftime("%Y")
+        
+        log_base_dir = r"D:\tài liệu\ie101\model\LOG phiên"
+        os.makedirs(log_base_dir, exist_ok=True)
+        
+        prefix = f"ngày {day_str} tháng {month_str} năm {year_str} phiên "
+        existing_folders = [d for d in os.listdir(log_base_dir) if os.path.isdir(os.path.join(log_base_dir, d)) and d.startswith(prefix)]
+        
+        n = len(existing_folders) + 1
+        session_folder_name = f"{prefix}{n}"
+        current_session_dir = os.path.join(log_base_dir, session_folder_name)
+        os.makedirs(current_session_dir, exist_ok=True)
+        print(f"[SESSION] Auto-initialized session folder: {current_session_dir}")
+        return current_session_dir
+
 class CandidateTracker:
     def __init__(self, max_disappeared=20, distance_threshold=250):
         self.next_id = 1
@@ -651,6 +704,26 @@ async def lifespan(app: FastAPI):
             print(f"[STARTUP CRITICAL] Haar Cascade direct fallback failed: {fallback_err}")
         
     print("[STARTUP] Models loaded successfully.")
+    
+    # Print LAN access links dynamically
+    try:
+        import socket
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        # We use a dummy UDP connection to google DNS to find the machine's primary local IP address
+        s.connect(("8.8.8.8", 80))
+        local_ip = s.getsockname()[0]
+        s.close()
+    except Exception:
+        local_ip = "127.0.0.1"
+        
+    print("\n" + "="*58)
+    print("                [LAN MODE IS ACTIVE]")
+    print("="*58)
+    print(" Other devices in the same LAN can access via:")
+    print(f" 1. Dashboard Admin:  https://{local_ip}:8001/")
+    print(f" 2. Exam Page:        https://{local_ip}:8001/exam")
+    print("="*58 + "\n")
+
     yield
     # Shutdown
     print("[SHUTDOWN] Closing application...")
@@ -746,6 +819,20 @@ student_screens = {}
 current_session_dir = None
 pending_exam_violations = {}
 
+class StudentWebcamProctorState:
+    def __init__(self):
+        self.out_of_frame_frames = 0
+        self.head_turn_frames = 0
+        self.glance_frames = 0
+        self.head_turn_start_time = None
+        self.last_profile_detected_time = None
+        self.glance_start_time = None
+        self.out_of_frame_start_time = None
+        self.last_glance_detected_time = None
+        self.last_screenshot_time = 0
+
+student_proctor_states = {}
+
 
 @app.websocket("/ws/exam")
 async def websocket_exam(websocket: WebSocket):
@@ -772,6 +859,260 @@ async def websocket_exam(websocket: WebSocket):
                 
             event_type = data.get("event_type")
             image = data.get("image")
+            
+            if event_type == "stream_frame" and student_id:
+                if student_id not in student_proctor_states:
+                    student_proctor_states[student_id] = StudentWebcamProctorState()
+                
+                state = student_proctor_states[student_id]
+                webcam_img = data.get("image")
+                screen_img = data.get("screen_image")
+                
+                annotated_base64 = ""
+                metrics = {
+                    "suspicion_index": 0,
+                    "violations": [],
+                    "num_persons": 0,
+                    "num_phones": 0,
+                    "num_laptops": 0,
+                    "num_books": 0
+                }
+                
+                if webcam_img:
+                    try:
+                        header, encoded = webcam_img.split(",", 1)
+                        image_bytes = base64.b64decode(encoded)
+                        img_np = np.frombuffer(image_bytes, dtype=np.uint8)
+                        frame = cv2.imdecode(img_np, cv2.IMREAD_COLOR)
+                        
+                        if frame is not None:
+                            h, w, _ = frame.shape
+                            current_time = time.time()
+                            
+                            violations = []
+                            num_persons = 0
+                            num_phones = 0
+                            num_laptops = 0
+                            num_books = 0
+                            
+                            # Grayscale for Haar Cascade detection
+                            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+                            gray = cv2.equalizeHist(gray)
+                            
+                            # Detect frontal faces
+                            faces = []
+                            profile_detected = False
+                            
+                            if face_cascade is not None:
+                                faces = face_cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=4, minSize=(60, 60))
+                                
+                            if len(faces) == 0 and profile_cascade is not None:
+                                profiles = profile_cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=4, minSize=(60, 60))
+                                if len(profiles) > 0:
+                                    profile_detected = True
+                                    faces = profiles
+                            
+                            if len(faces) == 0:
+                                state.out_of_frame_frames += 1
+                                state.glance_frames = max(0, state.glance_frames - 1)
+                                state.head_turn_frames = max(0, state.head_turn_frames - 1)
+                                state.head_turn_start_time = None
+                                state.last_profile_detected_time = None
+                                state.glance_start_time = None
+                                state.last_glance_detected_time = None
+                                if state.out_of_frame_start_time is None:
+                                    state.out_of_frame_start_time = current_time
+                            else:
+                                state.out_of_frame_frames = 0
+                                state.out_of_frame_start_time = None
+                                
+                                fx, fy, fw, fh = faces[0]
+                                
+                                COLOR_FACE = (16, 185, 129) if not profile_detected else (0, 140, 255)
+                                cv2.rectangle(frame, (fx, fy), (fx+fw, fy+fh), COLOR_FACE, 1)
+                                
+                                if profile_detected:
+                                    state.head_turn_frames += 1
+                                    state.glance_frames = max(0, state.glance_frames - 1)
+                                    state.glance_start_time = None
+                                    state.last_glance_detected_time = None
+                                    
+                                    state.last_profile_detected_time = current_time
+                                    if state.head_turn_start_time is None:
+                                        state.head_turn_start_time = current_time
+                                    
+                                    elapsed = current_time - state.head_turn_start_time
+                                    if elapsed > 3.0:
+                                        violations.append("Thí sinh quay đầu sang hai bên!")
+                                else:
+                                    state.head_turn_frames = max(0, state.head_turn_frames - 1)
+                                    if state.head_turn_start_time is not None:
+                                        if state.last_profile_detected_time is not None and (current_time - state.last_profile_detected_time > 1.0):
+                                            state.head_turn_start_time = None
+                                            state.last_profile_detected_time = None
+                                    
+                                    roi_gray = gray[fy:fy+fh, fx:fx+fw]
+                                    eyes = []
+                                    if eye_cascade is not None:
+                                        eyes = eye_cascade.detectMultiScale(roi_gray, scaleFactor=1.1, minNeighbors=4, minSize=(15, 15))
+                                    
+                                    for (ex, ey, ew, eh) in eyes:
+                                        ecX = fx + ex + ew // 2
+                                        ecY = fy + ey + eh // 2
+                                        cv2.circle(frame, (ecX, ecY), min(ew, eh) // 2, (241, 102, 99), 1)
+                                        cv2.circle(frame, (ecX, ecY), 2, (255, 255, 255), -1)
+                                    
+                                    if len(eyes) < 2:
+                                        state.glance_frames += 1
+                                        state.last_glance_detected_time = current_time
+                                        if state.glance_start_time is None:
+                                            state.glance_start_time = current_time
+                                        
+                                        elapsed = current_time - state.glance_start_time
+                                        if elapsed > 3.0:
+                                            violations.append("Thí sinh liếc mắt / nhìn ra ngoài!")
+                                    else:
+                                        state.glance_frames = max(0, state.glance_frames - 2)
+                                        if state.glance_start_time is not None:
+                                            if state.last_glance_detected_time is not None and (current_time - state.last_glance_detected_time > 1.0):
+                                                state.glance_start_time = None
+                                                state.last_glance_detected_time = None
+                                                
+                            # Run YOLOv8 for smart devices
+                            raw_violations = []
+                            if custom_model is not None:
+                                results_base = model.predict(source=frame, classes=[67, 73], conf=0.35, verbose=False, imgsz=480)
+                                for box in results_base[0].boxes:
+                                    coords = box.xyxy[0].tolist()
+                                    conf = float(box.conf[0])
+                                    cls = int(box.cls[0])
+                                    if cls == 67:
+                                        if conf < 0.45: continue
+                                        if (coords[2] - coords[0]) > 350 or (coords[3] - coords[1]) > 350: continue
+                                    
+                                    is_face_fp = False
+                                    for (fx, fy, fw, fh) in faces:
+                                        xA, yA = max(fx, coords[0]), max(fy, coords[1])
+                                        xB, yB = min(fx + fw, coords[2]), min(fy + fh, coords[3])
+                                        inter = max(0, xB - xA) * max(0, yB - yA)
+                                        area = (coords[2] - coords[0]) * (coords[3] - coords[1])
+                                        if inter / float(area + 1e-6) > 0.55:
+                                            is_face_fp = True
+                                            break
+                                    if is_face_fp: continue
+                                    raw_violations.append((coords, conf, cls))
+                                    
+                                results_custom = custom_model.predict(source=frame, classes=[0, 1, 2], conf=0.35, verbose=False, imgsz=512)
+                                for box in results_custom[0].boxes:
+                                    coords = box.xyxy[0].tolist()
+                                    conf = float(box.conf[0])
+                                    cls = int(box.cls[0])
+                                    mapped_cls = 67 if cls == 0 else (73 if cls == 1 else 2)
+                                    if mapped_cls == 67:
+                                        if conf < 0.45: continue
+                                        if (coords[2] - coords[0]) > 350 or (coords[3] - coords[1]) > 350: continue
+                                    
+                                    is_face_fp = False
+                                    for (fx, fy, fw, fh) in faces:
+                                        xA, yA = max(fx, coords[0]), max(fy, coords[1])
+                                        xB, yB = min(fx + fw, coords[2]), min(fy + fh, coords[3])
+                                        inter = max(0, xB - xA) * max(0, yB - yA)
+                                        area = (coords[2] - coords[0]) * (coords[3] - coords[1])
+                                        if inter / float(area + 1e-6) > 0.55:
+                                            is_face_fp = True
+                                            break
+                                    if is_face_fp: continue
+                                    raw_violations.append((coords, conf, mapped_cls))
+                            
+                            kept_violations = resolve_cross_class_overlaps(raw_violations)
+                            for coords, conf, cls in kept_violations:
+                                if cls == 67:
+                                    num_phones += 1
+                                    violations.append("Phát hiện sử dụng thiết bị cấm (Điện thoại).")
+                                    color = (68, 68, 239)
+                                elif cls == 73:
+                                    num_books += 1
+                                    violations.append("Phát hiện sử dụng tài liệu / sách giấy.")
+                                    color = (68, 68, 239)
+                                elif cls == 2:
+                                    # Still detect Casio but no warning alert added to violations
+                                    color = (16, 185, 129)
+                                else:
+                                    color = (68, 68, 239)
+                                
+                                cv2.rectangle(frame, (int(coords[0]), int(coords[1])), (int(coords[2]), int(coords[3])), color, 2)
+                            
+                            suspicion_index = 0
+                            if num_phones > 0:
+                                suspicion_index = 95
+                            elif state.out_of_frame_frames > 25:
+                                suspicion_index = 85
+                                violations.append("Thí sinh rời khỏi vị trí làm bài!")
+                            elif state.head_turn_frames > 15:
+                                suspicion_index = 75
+                            elif state.glance_frames > 15:
+                                suspicion_index = 50
+                            elif num_books > 0:
+                                suspicion_index = 45
+                            
+                            sid_low = student_id.lower()
+                            if sid_low in pending_exam_violations and pending_exam_violations[sid_low]:
+                                for v_item in pending_exam_violations[sid_low]:
+                                    violations.append(f"EXAM_ALERT: {v_item['message']}")
+                                pending_exam_violations[sid_low] = []
+                            
+                            _, buffer = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 55])
+                            annotated_base64 = "data:image/jpeg;base64," + base64.b64encode(buffer).decode("utf-8")
+                            
+                            metrics = {
+                                "suspicion_index": int(suspicion_index),
+                                "violations": list(set(violations)),
+                                "num_persons": int(len(faces)),
+                                "num_phones": int(num_phones),
+                                "num_laptops": int(num_laptops),
+                                "num_books": int(num_books)
+                            }
+                            
+                            # Save webcam screenshot for camera violations
+                            camera_violations = [v for v in violations if not v.startswith("EXAM_ALERT:")]
+                            if len(camera_violations) > 0 and current_time - state.last_screenshot_time > 5.0:
+                                try:
+                                    session_dir = get_or_create_session_dir()
+                                    classroom = get_student_classroom(student_id)
+                                    camera_save_dir = os.path.join(session_dir, classroom, student_id, "Camera")
+                                    os.makedirs(camera_save_dir, exist_ok=True)
+                                    
+                                    import datetime
+                                    now_str = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+                                    filename = f"{student_id}_{now_str}.jpg"
+                                    save_path = os.path.join(camera_save_dir, filename)
+                                    
+                                    ret_val, img_encoded = cv2.imencode('.jpg', frame)
+                                    if ret_val:
+                                        with open(save_path, "wb") as f_img:
+                                            f_img.write(img_encoded.tobytes())
+                                        print(f"[SCREENSHOT CAMERA] Saved webcam violation proof for {student_id}: {save_path}")
+                                        state.last_screenshot_time = current_time
+                                except Exception as e_save:
+                                    print(f"[SCREENSHOT CAMERA ERROR] Failed to save webcam proof: {e_save}")
+                    except Exception as ex_ai:
+                        print(f"[WS EXAM AI ERROR] Failed to process webcam stream for {student_id}: {ex_ai}")
+                        annotated_base64 = webcam_img
+                
+                admin_payload = {
+                    "event_type": "stream_frame",
+                    "student_id": student_id,
+                    "image": annotated_base64,
+                    "screen_image": screen_img,
+                    "metrics": metrics
+                }
+                admin_message = json.dumps(admin_payload)
+                for admin_ws in list(exam_admin_connections):
+                    try:
+                        await admin_ws.send_text(admin_message)
+                    except:
+                        exam_admin_connections.discard(admin_ws)
+                continue
             
             # If student is sharing their screen, save the screenshot frame
             if image and student_id:
@@ -807,13 +1148,18 @@ async def websocket_exam(websocket: WebSocket):
                     })
                     print(f"[WS EXAM VIOLATION] Queued exam violation for {student_id}: {msg}")
                     
-                    # Save screenshot of exam violation to current_session_dir/Exam
-                    if current_session_dir is not None and image:
+                    # Save screenshot of exam violation to D:\tài liệu\ie101\model\LOG phiên\<session_folder>\<classroom>\<student_id>\Exam
+                    if image:
                         try:
+                            session_dir = get_or_create_session_dir()
+                            classroom = get_student_classroom(student_id)
+                            exam_save_dir = os.path.join(session_dir, classroom, student_id, "Exam")
+                            os.makedirs(exam_save_dir, exist_ok=True)
+                            
                             import datetime
                             now_str = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
                             filename = f"{student_id}_{event_type}_{now_str}.jpg"
-                            exam_save_path = os.path.join(current_session_dir, "Exam", filename)
+                            exam_save_path = os.path.join(exam_save_dir, filename)
                             
                             if "," in image:
                                 _, encoded = image.split(",", 1)
@@ -889,6 +1235,8 @@ async def websocket_stream(websocket: WebSocket):
             conf_threshold = float(data.get("threshold") or 0.35)
             max_disappeared_time = float(data.get("max_disappeared_time") or 3.0)
             look_away_time = float(data.get("look_away_time") or 3.0)
+            gaze_ratio = float(data.get("gaze_ratio") or 0.85)
+            face_conf = float(data.get("face_conf") or 0.70)
             exam_active = bool(data.get("exam_active", False))
             monitoring_mode = data.get("monitoring_mode", "cctv")
             student_id = data.get("student_id")
@@ -897,28 +1245,8 @@ async def websocket_stream(websocket: WebSocket):
             if exam_active:
                 if not exam_session_active:
                     exam_session_active = True
-                    import datetime
                     try:
-                        now = datetime.datetime.now()
-                        day_str = now.strftime("%d")
-                        month_str = now.strftime("%m")
-                        year_str = now.strftime("%Y")
-                        log_base_dir = r"D:\tài liệu\ie101\model\LOG phiên"
-                        os.makedirs(log_base_dir, exist_ok=True)
-                        
-                        # Find existing session folders for today
-                        prefix = f"ngày {day_str} tháng {month_str} năm {year_str} phiên "
-                        existing_folders = [d for d in os.listdir(log_base_dir) if os.path.isdir(os.path.join(log_base_dir, d)) and d.startswith(prefix)]
-                        
-                        n = len(existing_folders) + 1
-                        session_folder_name = f"{prefix}{n}"
-                        current_session_dir = os.path.join(log_base_dir, session_folder_name)
-                        os.makedirs(current_session_dir, exist_ok=True)
-                        
-                        # Create subfolders
-                        os.makedirs(os.path.join(current_session_dir, "camera"), exist_ok=True)
-                        os.makedirs(os.path.join(current_session_dir, "Exam"), exist_ok=True)
-                        print(f"[SESSION] Created new session folder: {current_session_dir} with camera and Exam subfolders")
+                        get_or_create_session_dir()
                     except Exception as e:
                         print(f"[SESSION ERROR] Failed to create session folder: {e}")
             else:
@@ -966,11 +1294,11 @@ async def websocket_stream(websocket: WebSocket):
                 profile_detected = False
                 
                 if face_cascade is not None:
-                    faces = face_cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=4, minSize=(60, 60))
+                    faces = face_cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=3, minSize=(60, 60))
                     
                 if len(faces) == 0 and profile_cascade is not None:
                     # No frontal face found, try profile face (sideways head turning)
-                    profiles = profile_cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=4, minSize=(60, 60))
+                    profiles = profile_cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=3, minSize=(60, 60))
                     if len(profiles) > 0:
                         profile_detected = True
                         faces = profiles
@@ -1040,7 +1368,7 @@ async def websocket_stream(websocket: WebSocket):
                         roi_gray = gray[fy:fy+fh, fx:fx+fw]
                         eyes = []
                         if eye_cascade is not None:
-                            eyes = eye_cascade.detectMultiScale(roi_gray, scaleFactor=1.1, minNeighbors=4, minSize=(15, 15))
+                            eyes = eye_cascade.detectMultiScale(roi_gray, scaleFactor=1.1, minNeighbors=3, minSize=(15, 15))
                         
                         # Draw blue sci-fi target circles on eyes
                         for (ex, ey, ew, eh) in eyes:
@@ -1072,12 +1400,14 @@ async def websocket_stream(websocket: WebSocket):
                 # Run YOLOv8 for violations (smart devices, laptops, books)
                 raw_violations = []
                 if custom_model is not None:
-                    # Base model for Laptop (63), Cell Phone (67), Book (73)
-                    results_base = model.predict(source=frame, classes=[63, 67, 73], conf=conf_threshold, verbose=False, imgsz=480)
+                    # Base model for Cell Phone (67), Book (73)
+                    results_base = model.predict(source=frame, classes=[67, 73], conf=conf_threshold, verbose=False, imgsz=480)
                     for box in results_base[0].boxes:
                         coords = box.xyxy[0].tolist()
                         conf = float(box.conf[0])
                         cls = int(box.cls[0])
+                        if cls == 63:
+                            continue
                         print(f"[WEBCAM BASE DETECT] cls: {cls}, conf: {conf:.2f}, size: {int(coords[2]-coords[0])}x{int(coords[3]-coords[1])}")
                         if cls == 67:
                             # Double-shield filter: Cell phones must have higher confidence to prevent false alarms in Webcam mode
@@ -1152,11 +1482,13 @@ async def websocket_stream(websocket: WebSocket):
                         raw_violations.append((coords, conf, mapped_cls))
                 else:
                     # Fallback to standard base model
-                    results = model.predict(source=frame, classes=[63, 67, 73], conf=conf_threshold, verbose=False, imgsz=512)
+                    results = model.predict(source=frame, classes=[67, 73], conf=conf_threshold, verbose=False, imgsz=512)
                     for box in results[0].boxes:
                         coords = box.xyxy[0].tolist()
                         conf = float(box.conf[0])
                         cls = int(box.cls[0])
+                        if cls == 63:
+                            continue
                         if cls == 67:
                             min_phone_conf = conf_threshold
                             if conf < min_phone_conf:
@@ -1225,9 +1557,8 @@ async def websocket_stream(websocket: WebSocket):
                         color = COLOR_VIOLATION
                         violations.append("Phát hiện tài liệu/sách!")
                     elif cls == 2:
-                        display_label = f"VIOLATION: CASIO CALCULATOR {conf:.2f}"
-                        color = COLOR_VIOLATION
-                        violations.append("Phát hiện máy tính Casio!")
+                        display_label = f"CASIO CALCULATOR {conf:.2f}"
+                        color = (16, 185, 129)
                     
                     cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
                     tf = max(1, int(1))
@@ -1262,12 +1593,14 @@ async def websocket_stream(websocket: WebSocket):
                 person_detections = []
                 raw_violations = []
                 if custom_model is not None:
-                    # 1. Base model for Person (0), Laptop (63), Cell Phone (67), Book (73)
-                    results_base = model.predict(source=frame, classes=[0, 63, 67, 73], conf=conf_threshold, verbose=False, imgsz=480)
+                    # 1. Base model for Person (0), Cell Phone (67), Book (73)
+                    results_base = model.predict(source=frame, classes=[0, 67, 73], conf=conf_threshold, verbose=False, imgsz=480)
                     for box in results_base[0].boxes:
                         coords = box.xyxy[0].tolist()
                         conf = float(box.conf[0])
                         cls = int(box.cls[0])
+                        if cls == 63:
+                            continue
                         print(f"[CCTV BASE DETECT] cls: {cls}, conf: {conf:.2f}, size: {int(coords[2]-coords[0])}x{int(coords[3]-coords[1])}")
                         if cls == 0:
                             person_detections.append((coords, conf))
@@ -1329,11 +1662,13 @@ async def websocket_stream(websocket: WebSocket):
                         raw_violations.append((coords, conf, mapped_cls))
                 else:
                     # Fallback to standard base model only
-                    results = model.predict(source=frame, classes=[0, 63, 67, 73], conf=conf_threshold, verbose=False, imgsz=512)
+                    results = model.predict(source=frame, classes=[0, 67, 73], conf=conf_threshold, verbose=False, imgsz=512)
                     for box in results[0].boxes:
                         coords = box.xyxy[0].tolist()
                         conf = float(box.conf[0])
                         cls = int(box.cls[0])
+                        if cls == 63:
+                            continue
                         if cls == 0:
                             person_detections.append((coords, conf))
                         else:
@@ -1422,9 +1757,8 @@ async def websocket_stream(websocket: WebSocket):
                         color = COLOR_VIOLATION
                         violations.append("Phát hiện tài liệu/sách!")
                     elif cls == 2:
-                        display_label = f"VIOLATION: CASIO CALCULATOR {conf:.2f}"
-                        color = COLOR_VIOLATION
-                        violations.append("Phát hiện máy tính Casio!")
+                        display_label = f"CASIO CALCULATOR {conf:.2f}"
+                        color = (16, 185, 129)
                     
                     cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
                     tf = max(1, int(1))
@@ -1489,8 +1823,8 @@ async def websocket_stream(websocket: WebSocket):
                     pending_exam_violations[other_sid] = []
             violations.extend(exam_alerts)
             
-            # Suppress all proctoring violations and suspicion index if session is inactive
-            if not exam_active or current_session_dir is None:
+            # Suppress all proctoring violations and suspicion index if session is inactive (CCTV mode only)
+            if monitoring_mode == "cctv" and (not exam_active or current_session_dir is None):
                 violations = []
                 suspicion_index = 0
                 num_phones = 0
@@ -1531,16 +1865,20 @@ async def websocket_stream(websocket: WebSocket):
             }
             
             # Save screenshot proof if the exam session is active and a camera violation is detected
-            if exam_active and len(violations) > 0 and current_session_dir is not None:
+            if exam_active and len(violations) > 0:
                 camera_violations = [v for v in violations if not v.startswith("EXAM_ALERT:")]
                 if len(camera_violations) > 0 and current_time - last_screenshot_time > 5.0:
                     import datetime
                     try:
-                        now_str = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+                        session_dir = get_or_create_session_dir()
                         student_label = student_id if student_id else "id01"
-                        filename = f"{student_label}_{now_str}.jpg"
+                        classroom = get_student_classroom(student_label)
+                        camera_save_dir = os.path.join(session_dir, classroom, student_label, "Camera")
+                        os.makedirs(camera_save_dir, exist_ok=True)
                         
-                        save_path = os.path.join(current_session_dir, "camera", filename)
+                        now_str = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+                        filename = f"{student_label}_{now_str}.jpg"
+                        save_path = os.path.join(camera_save_dir, filename)
                         
                         # Encode and write safely using Python standard open to bypass OpenCV's Windows unicode path bug
                         ret_val, img_encoded = cv2.imencode('.jpg', frame)
@@ -1603,8 +1941,8 @@ def get_video_feed(camera_idx: int = 0):
                     raw_violations = []
                     
                     if custom_model is not None:
-                        # 1. Base model for Person (0) and Laptop (63)
-                        results_base = model.predict(source=frame, classes=[0, 63], conf=0.35, verbose=False, imgsz=480)
+                        # 1. Base model for Person (0)
+                        results_base = model.predict(source=frame, classes=[0], conf=0.35, verbose=False, imgsz=480)
                         for box in results_base[0].boxes:
                             coords = box.xyxy[0].tolist()
                             conf = float(box.conf[0])
@@ -1612,7 +1950,7 @@ def get_video_feed(camera_idx: int = 0):
                             if cls == 0:
                                 person_detections.append((coords, conf))
                             elif cls == 63:
-                                raw_violations.append((coords, conf, 63))
+                                continue
                                 
                         # 2. Custom model for Mobile phone (0), Book (1), and Casio (2)
                         results_custom = custom_model.predict(source=frame, classes=[0, 1, 2], conf=0.35, verbose=False, imgsz=512)
@@ -1662,11 +2000,13 @@ def get_video_feed(camera_idx: int = 0):
                             raw_violations.append((coords, conf, mapped_cls))
                     else:
                         # Fallback to standard base model only
-                        results = model.predict(source=frame, classes=[0, 63, 67, 73], conf=0.35, verbose=False, imgsz=512)
+                        results = model.predict(source=frame, classes=[0, 67, 73], conf=0.35, verbose=False, imgsz=512)
                         for box in results[0].boxes:
                             coords = box.xyxy[0].tolist()
                             conf = float(box.conf[0])
                             cls = int(box.cls[0])
+                            if cls == 63:
+                                continue
                             if cls == 0:
                                 person_detections.append((coords, conf))
                             else:
@@ -1705,12 +2045,12 @@ def get_video_feed(camera_idx: int = 0):
                         conf = item["conf"]
                         cls = item["cls"]
                         x1, y1, x2, y2 = map(int, coords)
-                        if cls == 67 or cls == 63:
+                        if cls == 67:
                             color = (68, 68, 239)
                             label = f"VIOLATION: SMART DEVICE {conf:.2f}"
                         elif cls == 2:
-                            color = (0, 140, 255)
-                            label = f"VIOLATION: CASIO CALCULATOR {conf:.2f}"
+                            color = (16, 185, 129)
+                            label = f"CASIO CALCULATOR {conf:.2f}"
                         else:
                             color = (0, 140, 255)
                             label = f"VIOLATION: {model.names[cls] if cls in model.names else f'Class {cls}'} {conf:.2f}"

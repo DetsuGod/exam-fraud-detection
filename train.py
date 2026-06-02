@@ -22,7 +22,7 @@ def main():
     # Tien hanh huan luyen mo hinh voi cac tham so toi uu hoa cho YOLOv8 Nano tren CPU
     results = model.train(
         data=data_yaml,
-        epochs=25,          # tang len 25 epochs de mo hinh dat chat luong cao nhat
+        epochs=25,          # Theo yeu cau cua ban, tang len 25 epochs de mo hinh dat chat luong cao nhat
         imgsz=512,          # Giup nhan dien vat nho (dien thoai, sach) tot nhat
         batch=16,           # Batch size toi uu
         optimizer='AdamW',  # Optimizer hien dai giup on dinh trong so

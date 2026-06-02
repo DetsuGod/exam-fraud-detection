@@ -138,8 +138,8 @@
         .cam-trigger-btn svg { fill: currentColor; }
 
         .room-monitor-workspace { display: flex; flex-direction: column; gap: 1.25rem; }
-        .class-cctv-container { width: 100%; background: #020205; border-radius: 12px; border: 1px solid var(--glass-border); overflow: hidden; position: relative; aspect-ratio: 16/9; max-height: 480px; }
-        #class-cctv-canvas { width: 100%; height: 100%; object-fit: contain; display: block; }
+        .class-cctv-container { width: 100%; background: #020205; border-radius: 12px; border: 1px solid var(--glass-border); overflow: hidden; position: relative; aspect-ratio: 21/9; max-height: 280px; }
+        #class-cctv-canvas { width: 100%; height: 100%; object-fit: cover; display: block; }
         .feed-label-tag { position: absolute; top: 0.4rem; left: 0.4rem; background: rgba(0, 0, 0, 0.75); border: 1px solid rgba(255, 255, 255, 0.2); color: #ffffff; font-size: 0.6rem; padding: 0.15rem 0.4rem; border-radius: 3px; font-family: var(--font-mono); font-weight: 500; z-index: 2; }
         .laser-scanner { position: absolute; left: 0; right: 0; height: 2px; background: linear-gradient(to right, rgba(239, 68, 68, 0), rgba(239, 68, 68, 0.8), rgba(239, 68, 68, 0)); box-shadow: 0 0 10px 2px rgba(239, 68, 68, 0.3); animation: details-scan 3.5s linear infinite; pointer-events: none; z-index: 1; }
         .laser-scanner.color-blue { background: linear-gradient(to right, rgba(99, 102, 241, 0), rgba(99, 102, 241, 0.8), rgba(99, 102, 241, 0)); box-shadow: 0 0 10px 2px rgba(99, 102, 241, 0.3); }
@@ -309,8 +309,7 @@
     <div class="orb orb-1"></div>
     <div class="orb orb-2"></div>
 
-    <video id="real-webcam" autoplay playsinline muted style="display:none;"></video>
-    <video id="real-cctv-webcam" autoplay playsinline muted style="display:none;"></video>
+    <video id="real-webcam" autoplay playsinline style="display:none;"></video>
 
     <nav class="app-sidebar">
         <div class="sidebar-header">
@@ -390,17 +389,11 @@
                 <span id="room-badge" style="display: none; font-size: 0.7rem; background: rgba(99, 102, 241, 0.2); border: 1px solid var(--accent-primary); padding: 0.15rem 0.5rem; border-radius: 9999px; color: #a5b4fc; font-weight: 600; margin-left: 0.5rem;">B202</span>
             </div>
             
-            <div style="display: flex; align-items: center; gap: 1rem;">
-                <div id="camera-selection-panel" style="display: flex; align-items: center; gap: 0.75rem; background: rgba(255,255,255,0.03); padding: 0.35rem 0.75rem; border-radius: 10px; border: 1px solid var(--glass-border);">
-                    <div style="display:flex; flex-direction:column; gap:0.15rem;">
-                        <span style="font-size:0.55rem; color:var(--text-secondary); text-transform:uppercase; font-weight:600; letter-spacing:0.02em;">Cam Thí sinh</span>
-                        <select id="user-camera-select" style="width: 140px; background: rgba(0,0,0,0.4); border: 1px solid var(--glass-border); color: #fff; padding: 0.15rem 0.35rem; font-size: 0.72rem; border-radius: 4px; outline: none; cursor: pointer;"></select>
-                    </div>
-                    <div style="display:flex; flex-direction:column; gap:0.15rem;">
-                        <span style="font-size:0.55rem; color:var(--text-secondary); text-transform:uppercase; font-weight:600; letter-spacing:0.02em;">Cam Tổng (CCTV)</span>
-                        <select id="cctv-camera-select" style="width: 140px; background: rgba(0,0,0,0.4); border: 1px solid var(--glass-border); color: #fff; padding: 0.15rem 0.35rem; font-size: 0.72rem; border-radius: 4px; outline: none; cursor: pointer;"></select>
-                    </div>
-                </div>
+            <div style="display: flex; align-items: center; gap: 1.5rem;">
+                <button class="cam-trigger-btn" id="start-webcam-btn" onclick="startWebcam()">
+                    <svg width="16" height="16" fill="currentColor" viewBox="0 0 24 24"><path d="M17 10.5V7c0-.55-.45-1-1-1H4c-.55 0-1 .45-1 1v10c0 .55.45 1 1 1h12c.55 0 1-.45 1-1v-3.5l4 4v-11l-4 4z"/></svg>
+                    Khởi Động Camera Laptop
+                </button>
                 
                 <div class="system-stats-bar">
                     <div class="stat-item">
@@ -419,12 +412,6 @@
                         <span class="stat-label">Cảnh Báo</span>
                         <span class="stat-val violating" id="global-danger-rooms">0</span>
                     </div>
-                    
-                    <button id="global-session-btn" style="background: linear-gradient(135deg, #10b981 0%, #059669 100%); color: #fff; font-family: var(--font-main); font-size: 0.8rem; font-weight: 700; padding: 0.4rem 1rem; border-radius: 8px; border: none; cursor: pointer; display: flex; align-items: center; gap: 0.4rem; transition: all 0.3s; box-shadow: 0 0 10px rgba(16, 185, 129, 0.2); margin-right: 0.5rem;" onclick="toggleGlobalSession()">
-                        <span id="global-session-dot" style="width: 8px; height: 8px; border-radius: 50%; background: #fff; display: inline-block;"></span>
-                        <span id="global-session-text">Bắt đầu phiên thi</span>
-                    </button>
-
                     <div class="time-badge" id="live-clock">12:00:00</div>
 
                     <div style="width: 1px; height: 30px; background: rgba(255,255,255,0.1); margin: 0 0.5rem;"></div>
@@ -759,44 +746,57 @@
                     <div class="toolbar">
                         <h2 style="font-size: 1.1rem; font-weight: 600;">Thông số mô hình nhận diện hành vi (YOLOv8 & GazeTracking)</h2>
                         <div style="display: flex; gap: 0.5rem;">
-                            <button class="filter-btn" style="background: transparent; border-color: rgba(255,255,255,0.2);" onclick="restoreDefaultAiConfig()">Khôi phục mặc định</button>
+                            <button class="filter-btn" style="background: transparent; border-color: rgba(255,255,255,0.2);" onclick="showToast('Đã khôi phục thông số AI mặc định.')">Khôi phục mặc định</button>
                             <button class="filter-btn" onclick="showToast('Đang chạy kịch bản Kiểm thử AI...')">Kiểm thử AI</button>
                             <button class="cam-trigger-btn" onclick="showToast('Đã lưu cấu hình AI thành công!')">Lưu cấu hình</button>
                         </div>
                     </div>
                     
-                    <div style="max-width: 680px; margin: 1.5rem auto; width: 100%;">
-                        <div class="panel-card" style="padding: 2rem; border-radius: 16px; background: rgba(15, 12, 38, 0.6); border-color: rgba(99, 102, 241, 0.25);">
-                            <div class="panel-title" style="font-size: 1.15rem; font-weight: 700; margin-bottom: 1.5rem; text-shadow: 0 0 10px rgba(99,102,241,0.5); color: #fff;">
-                                CẤU HÌNH THÔNG SỐ AI & NHẬN DIỆN KHUÔN MẶT
+                    <div class="grid-2-col">
+                        <div class="panel-card">
+                            <div class="panel-title">Nhận diện khuôn mặt & Gaze</div>
+                            <div class="form-group" style="margin-bottom: 1rem;">
+                                <label class="form-label">Ngưỡng mất khuôn mặt (Confidence)</label>
+                                <input type="range" min="0" max="100" value="70" class="form-input" style="padding: 0; height: 5px;">
+                                <div style="text-align: right; font-size: 0.8rem;">70%</div>
+                            </div>
+                            <div class="form-group" style="margin-bottom: 1rem;">
+                                <label class="form-label">Thời gian mất khuôn mặt tối đa (giây)</label>
+                                <input type="number" class="form-input" value="5">
+                            </div>
+                            <div class="form-group" style="margin-bottom: 1rem;">
+                                <label class="form-label">Ngưỡng nhìn lệch (Gaze ratio)</label>
+                                <input type="range" min="0" max="100" value="85" class="form-input" style="padding: 0; height: 5px;">
+                                <div style="text-align: right; font-size: 0.8rem;">85%</div>
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">Thời gian nhìn lệch liên tục (giây)</label>
+                                <input type="number" class="form-input" value="10">
+                            </div>
+                        </div>
+
+                        <div class="panel-card">
+                            <div class="panel-title">Thiết bị & Cảnh báo</div>
+                            <div class="form-group" style="margin-bottom: 1rem; flex-direction: row; justify-content: space-between; align-items: center;">
+                                <label class="form-label">Phát hiện điện thoại di động</label>
+                                <input type="checkbox" checked style="width: 18px; height: 18px;">
+                            </div>
+                            <div class="form-group" style="margin-bottom: 1rem; flex-direction: row; justify-content: space-between; align-items: center;">
+                                <label class="form-label">Phát hiện tai nghe</label>
+                                <input type="checkbox" checked style="width: 18px; height: 18px;">
+                            </div>
+                            <div class="form-group" style="margin-bottom: 1.5rem; flex-direction: row; justify-content: space-between; align-items: center;">
+                                <label class="form-label">Phát hiện nhiều người trong khung hình</label>
+                                <input type="checkbox" checked style="width: 18px; height: 18px;">
                             </div>
                             
-                            <div class="form-group" style="margin-bottom: 1.25rem;">
-                                <label class="form-label" style="font-size: 0.82rem; font-weight: 600;">Độ Nhạy Mô Hình (YOLOv8 CONF Threshold)</label>
-                                <input type="range" id="ai-conf-threshold" min="10" max="100" value="35" class="form-input" style="padding: 0; height: 5px; cursor: pointer;" oninput="updateAiConfig()">
-                                <div id="ai-conf-threshold-lbl" style="text-align: right; font-size: 0.8rem; color: var(--accent-primary); font-weight: 600;">35%</div>
+                            <div class="form-group" style="margin-bottom: 1rem;">
+                                <label class="form-label">Số lần cảnh báo liên tiếp kích hoạt Đình Chỉ</label>
+                                <input type="number" class="form-input" value="3">
                             </div>
-                            
-                            <div class="form-group" style="margin-bottom: 1.25rem;">
-                                <label class="form-label" style="font-size: 0.82rem; font-weight: 600;">Thời Gian Mất Khuôn Mặt Tối Đa (giây)</label>
-                                <input type="number" id="ai-max-disappeared" class="form-input" value="3" style="background: rgba(0,0,0,0.3); border: 1px solid var(--glass-border); color: #fff; border-radius: 6px;" oninput="updateAiConfig()">
-                            </div>
-                            
-                            <div class="form-group" style="margin-bottom: 1.25rem;">
-                                <label class="form-label" style="font-size: 0.82rem; font-weight: 600;">Thời Gian Nhìn Lệch / Quay Đầu Liên Tục (giây)</label>
-                                <input type="number" id="ai-look-away-time" class="form-input" value="3" style="background: rgba(0,0,0,0.3); border: 1px solid var(--glass-border); color: #fff; border-radius: 6px;" oninput="updateAiConfig()">
-                            </div>
-                            
-                            <div class="form-group" style="margin-bottom: 1.25rem;">
-                                <label class="form-label" style="font-size: 0.82rem; font-weight: 600;">Ngưỡng Nhìn Lệch (Gaze Ratio)</label>
-                                <input type="range" id="ai-gaze-ratio" min="50" max="100" value="85" class="form-input" style="padding: 0; height: 5px; cursor: pointer;" oninput="updateAiConfig()">
-                                <div id="ai-gaze-ratio-lbl" style="text-align: right; font-size: 0.8rem; color: var(--accent-primary); font-weight: 600;">85%</div>
-                            </div>
-                            
-                            <div class="form-group" style="margin-bottom: 0.5rem;">
-                                <label class="form-label" style="font-size: 0.82rem; font-weight: 600;">Ngưỡng Nhận Diện Khuôn Mặt (Confidence)</label>
-                                <input type="range" id="ai-face-conf" min="10" max="100" value="70" class="form-input" style="padding: 0; height: 5px; cursor: pointer;" oninput="updateAiConfig()">
-                                <div id="ai-face-conf-lbl" style="text-align: right; font-size: 0.8rem; color: var(--accent-primary); font-weight: 600;">70%</div>
+                            <div class="form-group">
+                                <label class="form-label">Khoảng thời gian reset cảnh báo (phút)</label>
+                                <input type="number" class="form-input" value="15">
                             </div>
                         </div>
                     </div>
@@ -1014,52 +1014,6 @@
 
         let ticksGlobal = 0;
         window.isWebcamActive = false;
-        let wsConnection = null;
-        let frameInterval = null;
-        let lastFrameTime = performance.now();
-
-        // CCTV Webcam Integration Variables
-        window.isCctvWebcamActive = false;
-        window.cctvProcessedImage = null;
-        window.activeUserDeviceId = null;
-        window.activeCctvDeviceId = null;
-        let wsConnectionCCTV = null;
-        let frameIntervalCCTV = null;
-        let lastFrameTimeCCTV = performance.now();
-
-        window.isExamActive = false;
-
-        function toggleGlobalSession() {
-            const btn = document.getElementById("global-session-btn");
-            const dot = document.getElementById("global-session-dot");
-            const txt = document.getElementById("global-session-text");
-            if (!btn || !txt || !dot) return;
-
-            window.isExamActive = !window.isExamActive;
-
-            if (window.isExamActive) {
-                btn.style.background = "linear-gradient(135deg, #ef4444 0%, #dc2626 100%)";
-                btn.style.boxShadow = "0 0 15px rgba(239, 68, 68, 0.4)";
-                dot.style.animation = "pulse-danger-bg 1.5s infinite";
-                txt.innerText = "Kết thúc phiên thi";
-                showToast("Phiên thi đã BẮT ĐẦU. Đang kích hoạt các tính năng phát hiện gian lận AI.");
-            } else {
-                btn.style.background = "linear-gradient(135deg, #10b981 0%, #059669 100%)";
-                btn.style.boxShadow = "0 0 10px rgba(16, 185, 129, 0.2)";
-                dot.style.animation = "none";
-                txt.innerText = "Bắt đầu phiên thi";
-                showToast("Phiên thi đã KẾT THÚC. Đã tạm dừng phát hiện gian lận.");
-            }
-        }
-
-        // AI Configuration Variables
-        window.aiConfig = {
-            confThreshold: 0.35,
-            maxDisappearedTime: 3.0,
-            lookAwayTime: 3.0,
-            gazeRatio: 0.85,
-            faceConf: 0.70
-        };
 
         const detailPane = document.getElementById("detail-pane");
         const detCanvasFront = document.getElementById("det-canvas-front");
@@ -1183,577 +1137,18 @@
             renderAlertsTable(); 
         }
 
-        async function enumerateDashboardCameras() {
-            try {
-                // Request temporary permission to unlock camera labels
-                const tempStream = await navigator.mediaDevices.getUserMedia({ video: true });
-                tempStream.getTracks().forEach(track => track.stop());
-                
-                const devices = await navigator.mediaDevices.enumerateDevices();
-                const videoDevices = devices.filter(device => device.kind === 'videoinput');
-                
-                const userSelect = document.getElementById("user-camera-select");
-                const cctvSelect = document.getElementById("cctv-camera-select");
-                
-                userSelect.innerHTML = "";
-                cctvSelect.innerHTML = "";
-                
-                if (videoDevices.length === 0) {
-                    userSelect.innerHTML = `<option value="">No Camera</option>`;
-                    cctvSelect.innerHTML = `<option value="">No Camera</option>`;
-                    return;
-                }
-                
-                videoDevices.forEach((device, index) => {
-                    const name = device.label || `Camera ${index + 1}`;
-                    
-                    const optionUser = document.createElement("option");
-                    optionUser.value = device.deviceId;
-                    optionUser.text = name;
-                    
-                    const optionCctv = document.createElement("option");
-                    optionCctv.value = device.deviceId;
-                    optionCctv.text = name;
-                    
-                    userSelect.appendChild(optionUser);
-                    cctvSelect.appendChild(optionCctv);
-                });
-                
-                // Smart auto-select logic
-                let userDeviceIndex = 0;
-                let cctvDeviceIndex = 0;
-                
-                let iriunIndex = -1;
-                let nonLaptopIndex = -1;
-                let laptopIndex = -1;
-                
-                videoDevices.forEach((device, index) => {
-                    const name = device.label.toLowerCase();
-                    if (name.includes("iriun")) {
-                        iriunIndex = index;
-                    }
-                    if (name.includes("integrated") || name.includes("built-in") || name.includes("laptop") || name.includes("front") || name.includes("hp truevision") || name.includes("hd camera") || name.includes("webcam") || name.includes("facetime") || name.includes("usb video")) {
-                        if (laptopIndex === -1) {
-                            laptopIndex = index;
-                        }
-                    }
-                    if (!name.includes("integrated") && !name.includes("built-in") && !name.includes("laptop") && !name.includes("front") && !name.includes("hp truevision")) {
-                        if (nonLaptopIndex === -1 && !name.includes("iriun")) {
-                            nonLaptopIndex = index;
-                        }
-                    }
-                });
-                
-                // User prefers Laptop built-in webcam for local dashboard webcam mock
-                if (laptopIndex !== -1) {
-                    userDeviceIndex = laptopIndex;
-                } else {
-                    userDeviceIndex = 0;
-                }
-                
-                // CCTV prefers Iriun Webcam ONLY. If Iriun is not connected, it can select another external camera, or 0.
-                if (iriunIndex !== -1) {
-                    cctvDeviceIndex = iriunIndex;
-                } else if (nonLaptopIndex !== -1) {
-                    cctvDeviceIndex = nonLaptopIndex;
-                } else {
-                    cctvDeviceIndex = 0;
-                }
-                
-                userSelect.selectedIndex = userDeviceIndex;
-                cctvSelect.selectedIndex = cctvDeviceIndex;
-                
-                // Attach event listeners to update webcam stream instantly on selection change
-                if (!userSelect.dataset.hasChangeListener) {
-                    userSelect.addEventListener("change", async () => {
-                        console.log("User camera selection changed, restarting webcam...");
-                        await startWebcam();
-                    });
-                    userSelect.dataset.hasChangeListener = "true";
-                }
-                if (!cctvSelect.dataset.hasChangeListener) {
-                    cctvSelect.addEventListener("change", async () => {
-                        console.log("CCTV camera selection changed, restarting webcam...");
-                        await startWebcam();
-                    });
-                    cctvSelect.dataset.hasChangeListener = "true";
-                }
-                
-            } catch (err) {
-                console.error("Lỗi dò tìm camera trên Dashboard: ", err);
-            }
-        }
-        let wsConnectionUser = null;
-        let frameIntervalUser = null;
-        
-        async function startWebSocketUserProctoring() {
-            if (wsConnectionUser) {
-                wsConnectionUser.close();
-            }
-            
-            const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-            const wsUrl = `${protocol}//${window.location.host}/ws/stream`;
-            
-            console.log("Connecting User Cam WebSocket to " + wsUrl);
-            wsConnectionUser = new WebSocket(wsUrl);
-            
-            const hiddenCanvas = document.createElement("canvas");
-            hiddenCanvas.width = 640;
-            hiddenCanvas.height = 480;
-            const ctx = hiddenCanvas.getContext("2d");
-            
-            let readyStateWarnCount = 0;
-            function sendNextUserFrame() {
-                if (!window.isWebcamActive || !wsConnectionUser || wsConnectionUser.readyState !== WebSocket.OPEN) return;
-                
-                const videoEl = document.getElementById('real-webcam');
-                if (videoEl.readyState >= 2) {
-                    ctx.drawImage(videoEl, 0, 0, 640, 480);
-                    const imgBase64 = hiddenCanvas.toDataURL("image/jpeg", 0.65);
-                    
-                    let targetCandId = selectedCandidateId;
-                    if (!targetCandId) {
-                        const keys = Object.keys(candidates);
-                        if (keys.length > 0) {
-                            targetCandId = keys[0];
-                        }
-                    }
-                    
-                    if (targetCandId) {
-                        const payload = {
-                            image: imgBase64,
-                            threshold: window.aiConfig.confThreshold,
-                            max_disappeared_time: window.aiConfig.maxDisappearedTime,
-                            look_away_time: window.aiConfig.lookAwayTime,
-                            exam_active: window.isExamActive,
-                            monitoring_mode: "webcam",
-                            student_id: targetCandId
-                        };
-                        wsConnectionUser.send(JSON.stringify(payload));
-                    }
-                } else {
-                    readyStateWarnCount++;
-                    if (readyStateWarnCount % 25 === 0) {
-                        console.warn("[CAM] User Cam video readyState is too low (" + videoEl.readyState + "). Cannot capture frame yet. Make sure camera is not used by Zoom/Teams/OBS or another application.");
-                    }
-                }
-                
-                frameIntervalUser = setTimeout(sendNextUserFrame, 120);
-            }
-            
-            wsConnectionUser.onopen = () => {
-                console.log("WebSocket User proctoring connected.");
-                sendNextUserFrame();
-            };
-            
-            wsConnectionUser.onmessage = (event) => {
-                const response = JSON.parse(event.data);
-                const frameSrc = response.image;
-                const metrics = response.metrics;
-                
-                let targetCandId = selectedCandidateId;
-                if (!targetCandId) {
-                    const keys = Object.keys(candidates);
-                    if (keys.length > 0) {
-                        targetCandId = keys[0];
-                    }
-                }
-                
-                if (targetCandId && candidates[targetCandId]) {
-                    const cand = candidates[targetCandId];
-                    cand.processedImage = frameSrc;
-                    if (!cand.imgElement) {
-                        cand.imgElement = new Image();
-                    }
-                    cand.imgElement.src = frameSrc;
-                    cand.suspicion = metrics.suspicion_index;
-                    
-                    let oldStatus = cand.status;
-                    if (metrics.num_phones > 0 || metrics.suspicion_index >= 90) {
-                        cand.status = "danger";
-                    } else if (metrics.suspicion_index >= 40) {
-                        cand.status = "warning";
-                    } else {
-                        cand.status = "safe";
-                    }
-                    
-                    if (metrics.violations && metrics.violations.length > 0) {
-                        const nowSecs = getTimestampSeconds();
-                        // Find correct roomId for this candidate
-                        let candRoomId = currentRoomId;
-                        for (let rId in roomsData) {
-                            if (roomsData[rId].candidates && roomsData[rId].candidates[targetCandId]) {
-                                candRoomId = rId;
-                                break;
-                            }
-                        }
-                        metrics.violations.forEach(v => {
-                            const alreadyLogged = cand.logs.some(log => log.text === v && (getTimestampSeconds(log.time) > nowSecs - 8));
-                            if (!alreadyLogged) {
-                                let severity = "warning";
-                                if (v.includes("điện thoại") || v.includes("rời khỏi") || v.includes("người lạ")) {
-                                    severity = "critical";
-                                }
-                                if (candRoomId) {
-                                    appendAlert(candRoomId, cand.id, v, severity);
-                                } else {
-                                    // Fallback: log directly to candidate without room
-                                    const time = getTimestamp();
-                                    cand.logs.push({ time, text: v, type: severity });
-                                }
-                            }
-                        });
-                    }
-                    
-                    updateCardVisuals(cand);
-                    updateGlobalStats();
-                    
-                    if (selectedCandidateId === cand.id) {
-                        updateDetailPanelUI(cand);
-                    }
-                }
-            };
-            
-            wsConnectionUser.onerror = (e) => {
-                console.error("WebSocket User error: ", e);
-            };
-            
-            wsConnectionUser.onclose = () => {
-                console.log("WebSocket User disconnected. Reconnecting in 3s...");
-                setTimeout(startWebSocketUserProctoring, 3000);
-            };
-        }
-
         async function startWebcam() {
             try {
-                const cctvSelectEl = document.getElementById("cctv-camera-select");
-                const cctvDeviceId = cctvSelectEl ? cctvSelectEl.value : null;
-                
-                const userSelectEl = document.getElementById("user-camera-select");
-                const userDeviceId = userSelectEl ? userSelectEl.value : null;
-                
-                console.log("[CAM] startWebcam called. User Device:", userDeviceId, "CCTV Device:", cctvDeviceId);
-                
-                // Start User Webcam (Laptop camera) - Disabled local mock so candidate cam comes only from exam page stream
-                if (false && userDeviceId && (!window.isWebcamActive || window.activeUserDeviceId !== userDeviceId)) {
-                    if (window.isWebcamActive) {
-                        const videoEl = document.getElementById('real-webcam');
-                        if (videoEl && videoEl.srcObject) {
-                            videoEl.srcObject.getTracks().forEach(t => t.stop());
-                        }
-                    }
-                    
-                    const selectedUserName = userSelectEl.options[userSelectEl.selectedIndex].text;
-                    showToast(`Đang kích hoạt camera máy tính (User Cam): ${selectedUserName}`);
-                    console.log("[CAM] Initializing User Cam stream: " + selectedUserName);
-                    
-                    const userConstraints = { video: { deviceId: { exact: userDeviceId }, width: 640, height: 480 } };
-                    const userStream = await navigator.mediaDevices.getUserMedia(userConstraints);
-                    const userVideo = document.getElementById('real-webcam');
-                    userVideo.srcObject = userStream;
-                    
-                    try {
-                        await userVideo.play();
-                        console.log("[CAM] User Cam video element started playing successfully. Ready state:", userVideo.readyState);
-                    } catch (playErr) {
-                        console.warn("[CAM] User Cam video play failed, letting browser handle autoplay: ", playErr);
-                    }
-                    
-                    window.isWebcamActive = true;
-                    window.activeUserDeviceId = userDeviceId;
-                    
-                    startWebSocketUserProctoring();
-                }
-                
-                // Start CCTV camera
-                if (cctvDeviceId && (!window.isCctvWebcamActive || window.activeCctvDeviceId !== cctvDeviceId)) {
-                    if (window.isCctvWebcamActive) {
-                        const videoEl = document.getElementById('real-cctv-webcam');
-                        if (videoEl && videoEl.srcObject) {
-                            videoEl.srcObject.getTracks().forEach(t => t.stop());
-                        }
-                    }
-                    
-                    const selectedCctvName = cctvSelectEl.options[cctvSelectEl.selectedIndex].text;
-                    
-                    // CRITICAL: Ensure we do NOT open the laptop camera if we only want Iriun!
-                    if (selectedCctvName.toLowerCase().includes("integrated") || 
-                        selectedCctvName.toLowerCase().includes("built-in") || 
-                        selectedCctvName.toLowerCase().includes("laptop") || 
-                        selectedCctvName.toLowerCase().includes("hp truevision") ||
-                        selectedCctvName.toLowerCase().includes("usb video")) {
-                        console.log("[CAM] CCTV camera selected is a laptop built-in webcam. Skipping to prevent activation.");
-                        showToast("Cam tổng (CCTV) không sử dụng camera laptop!");
-                    } else {
-                        showToast(`Đang kích hoạt camera tổng thực tế: ${selectedCctvName}`);
-                        console.log("[CAM] Initializing CCTV Cam stream: " + selectedCctvName);
-                        
-                        const cctvConstraints = { video: { deviceId: { exact: cctvDeviceId }, width: 640, height: 480 } };
-                        const cctvStream = await navigator.mediaDevices.getUserMedia(cctvConstraints);
-                        const cctvVideo = document.getElementById('real-cctv-webcam');
-                        cctvVideo.srcObject = cctvStream;
-                        
-                        try {
-                            await cctvVideo.play();
-                            console.log("[CAM] CCTV Cam video element started playing successfully. Ready state:", cctvVideo.readyState);
-                        } catch (playErr) {
-                            console.warn("[CAM] CCTV Cam video play failed, letting browser handle autoplay: ", playErr);
-                        }
-                        
-                        window.isCctvWebcamActive = true;
-                        window.activeCctvDeviceId = cctvDeviceId;
-                        
-                        startWebSocketCCTVProctoring();
-                    }
-                }
-                
-                const selectionPanel = document.getElementById('camera-selection-panel');
-                if (selectionPanel) {
-                    selectionPanel.style.opacity = '0.8';
-                }
-                
+                const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+                const videoEl = document.getElementById('real-webcam');
+                videoEl.srcObject = stream;
+                document.getElementById('start-webcam-btn').style.display = 'none';
+                window.isWebcamActive = true;
+                showToast('Camera thực đã được kích hoạt (Gán cho ID01).');
             } catch (err) {
-                console.error("[CAM] Camera access error:", err);
+                alert("Không thể truy cập camera: " + err.message);
             }
         }
-
-        async function startWebSocketCCTVProctoring() {
-            if (wsConnectionCCTV) {
-                wsConnectionCCTV.close();
-            }
-            
-            const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-            const wsUrl = `${protocol}//${window.location.host}/ws/stream`;
-            
-            wsConnectionCCTV = new WebSocket(wsUrl);
-            
-            const hiddenCanvas = document.createElement("canvas");
-            hiddenCanvas.width = 640;
-            hiddenCanvas.height = 480;
-            const ctx = hiddenCanvas.getContext("2d");
-            
-            function sendNextCCTVFrame() {
-                if (!window.isCctvWebcamActive || !wsConnectionCCTV || wsConnectionCCTV.readyState !== WebSocket.OPEN) return;
-                
-                const videoEl = document.getElementById('real-cctv-webcam');
-                if (videoEl.readyState >= 2) {
-                    ctx.drawImage(videoEl, 0, 0, 640, 480);
-                    const imgBase64 = hiddenCanvas.toDataURL("image/jpeg", 0.65);
-                    
-                    const payload = {
-                        image: imgBase64,
-                        threshold: window.aiConfig.confThreshold,
-                        max_disappeared_time: window.aiConfig.maxDisappearedTime,
-                        look_away_time: window.aiConfig.lookAwayTime,
-                        exam_active: window.isExamActive,
-                        monitoring_mode: "cctv"
-                    };
-                    wsConnectionCCTV.send(JSON.stringify(payload));
-                    lastFrameTimeCCTV = performance.now();
-                } else {
-                    frameIntervalCCTV = setTimeout(sendNextCCTVFrame, 100);
-                }
-            }
-            
-            wsConnectionCCTV.onopen = () => {
-                console.log("WebSocket CCTV proctoring connected.");
-                sendNextCCTVFrame();
-            };
-            
-            wsConnectionCCTV.onmessage = (event) => {
-                const response = JSON.parse(event.data);
-                const frameSrc = response.image;
-                const metrics = response.metrics;
-                
-                window.cctvProcessedImage = frameSrc;
-                if (window.isCctvWebcamActive) {
-                    if (!window.cctvImgElement) {
-                        window.cctvImgElement = new Image();
-                    }
-                    window.cctvImgElement.src = frameSrc;
-                }
-                
-                // If there are CCTV global room violations (e.g. stranger, left position), append alert
-                if (currentRoomId && metrics.violations && metrics.violations.length > 0) {
-                    const nowSecs = getTimestampSeconds();
-                    metrics.violations.forEach(v => {
-                        const alreadyLogged = alertsList.some(alert => alert.roomId === currentRoomId && alert.message === v && (getTimestampSeconds(alert.time) > nowSecs - 8));
-                        if (!alreadyLogged) {
-                            let severity = (v.includes("rời khỏi") || v.includes("người lạ")) ? "critical" : "warning";
-                            appendAlert(currentRoomId, "cctv", v, severity);
-                        }
-                    });
-                }
-                
-                if (window.isCctvWebcamActive) {
-                    frameIntervalCCTV = setTimeout(sendNextCCTVFrame, 80);
-                }
-            };
-            
-            wsConnectionCCTV.onerror = (e) => {
-                console.error("WebSocket CCTV error: ", e);
-            };
-            
-            wsConnectionCCTV.onclose = () => {
-                console.log("WebSocket CCTV disconnected.");
-            };
-        }
-
-        function getTimestampSeconds(tStr = null) {
-            const timeStr = tStr || getTimestamp();
-            const parts = timeStr.split(':');
-            if (parts.length < 3) return 0;
-            return parseInt(parts[0]) * 3600 + parseInt(parts[1]) * 60 + parseInt(parts[2]);
-        }
-
-        async function startWebSocketProctoring() {
-            if (wsConnection) {
-                wsConnection.close();
-            }
-            
-            const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-            const wsUrl = `${protocol}//${window.location.host}/ws/exam?role=admin`;
-            
-            showToast('Đang kết nối trung tâm giám sát thí sinh qua WebSocket...');
-            wsConnection = new WebSocket(wsUrl);
-            
-            wsConnection.onopen = () => {
-                showToast('Hệ thống Giám sát Phòng thi đã kích hoạt thành công!');
-            };
-            
-            wsConnection.onmessage = (event) => {
-                const response = JSON.parse(event.data);
-                
-                // We only care about stream_frame messages
-                if (response.event_type !== "stream_frame") return;
-                
-                const studentId = response.student_id;
-                const frameSrc = response.image;
-                const screenSrc = response.screen_image;
-                const metrics = response.metrics;
-                
-                if (!studentId) return;
-                
-                let candId = studentId.toLowerCase();
-                if (!candId.startsWith("id")) {
-                    candId = "id" + candId;
-                }
-                
-                // Find room and candidate dynamically (case-insensitive key matching)
-                let foundCand = null;
-                let foundRoomId = null;
-                for (let rId in roomsData) {
-                    const room = roomsData[rId];
-                    if (room.candidates) {
-                        const matchedKey = Object.keys(room.candidates).find(k => k.toLowerCase() === candId);
-                        if (matchedKey) {
-                            foundCand = room.candidates[matchedKey];
-                            foundRoomId = rId;
-                            break;
-                        }
-                    }
-                }
-                
-                if (foundCand) {
-                    const cand = foundCand;
-                    if (frameSrc) {
-                        cand.processedImage = frameSrc;
-                        if (!cand.imgElement) {
-                            cand.imgElement = new Image();
-                        }
-                        cand.imgElement.src = frameSrc;
-                    }
-                    if (screenSrc) {
-                        cand.screenImage = screenSrc;
-                    }
-                    
-                    if (frameSrc) {
-                        cand.suspicion = metrics.suspicion_index;
-                        
-                        let oldStatus = cand.status;
-                        if (metrics.num_phones > 0 || metrics.suspicion_index >= 90) {
-                            cand.status = "danger";
-                        } else if (metrics.suspicion_index >= 40) {
-                            cand.status = "warning";
-                        } else {
-                            cand.status = "safe";
-                        }
-                    }
-                    
-                    // Prevent status resets by locking status if there's an exam violation in the last 15 seconds
-                    const nowSecs = getTimestampSeconds();
-                    const recentExamViolation = cand.logs.find(log => {
-                        const isExamViolation = log.text.includes("sao chép") || log.text.includes("chuyển tab") || log.text.includes("dừng chia sẻ") || log.text.includes("ẩn màn hình");
-                        return isExamViolation && (nowSecs - getTimestampSeconds(log.time) < 15);
-                    });
-                    
-                    if (recentExamViolation) {
-                        const isCritical = recentExamViolation.text.includes("dừng chia sẻ");
-                        cand.status = isCritical ? "danger" : "warning";
-                        cand.suspicion = Math.max(cand.suspicion, isCritical ? 95 : 75);
-                    }
-                    
-                    // Log real violations
-                    if (metrics.violations && metrics.violations.length > 0) {
-                        metrics.violations.forEach(v => {
-                            let displayViolation = v;
-                            let isExamAlert = false;
-                            if (v.startsWith("EXAM_ALERT: ")) {
-                                displayViolation = v.replace("EXAM_ALERT: ", "");
-                                isExamAlert = true;
-                            }
-                            
-                            // If this is a webcam violation and we don't have a webcam stream from exam page, ignore it
-                            if (!isExamAlert && !frameSrc) {
-                                return;
-                            }
-                            
-                            const alreadyLogged = cand.logs.some(log => log.text === displayViolation && (getTimestampSeconds(log.time) > nowSecs - 8));
-                            if (!alreadyLogged) {
-                                let severity = "warning";
-                                if (displayViolation.includes("điện thoại") || displayViolation.includes("rời khỏi") || displayViolation.includes("người lạ") || displayViolation.includes("dừng chia sẻ") || displayViolation.includes("CẢNH BÁO")) {
-                                    severity = "critical";
-                                }
-                                
-                                if (isExamAlert) {
-                                    if (severity === "critical") {
-                                        cand.status = "danger";
-                                        cand.suspicion = Math.max(cand.suspicion, 95);
-                                    } else {
-                                        cand.status = "warning";
-                                        cand.suspicion = Math.max(cand.suspicion, 75);
-                                    }
-                                }
-                                
-                                appendAlert(foundRoomId, cand.id, displayViolation, severity);
-                            }
-                        });
-                    }
-                    
-                    // Update UI
-                    if (currentRoomId === foundRoomId) {
-                        updateCardVisuals(cand);
-                    }
-                    updateGlobalStats();
-                    
-                    if (selectedCandidateId === cand.id) {
-                        updateDetailPanelUI(cand);
-                    }
-                }
-            };
-            
-            wsConnection.onerror = (e) => {
-                console.error("WebSocket proctoring error: ", e);
-                showToast("Lỗi kết nối WebSocket giám sát.");
-            };
-            
-            wsConnection.onclose = () => {
-                console.log("WebSocket proctoring disconnected. Reconnecting in 3s...");
-                setTimeout(startWebSocketProctoring, 3000);
-            };
-        }
-
-
 
         function showToast(msg) {
             const toast = document.createElement('div');
@@ -2034,7 +1429,7 @@
             document.getElementById('class-cctv-label').innerText =
                 'CAMERA TỔNG: ' + roomsData[roomId].name.toUpperCase();
             const cCanvas = document.getElementById('class-cctv-canvas');
-            cCanvas.width = 800; cCanvas.height = 450;
+            cCanvas.width = 700; cCanvas.height = 300;
             initCandidatesGrid();
         }
 
@@ -2152,14 +1547,6 @@
         }
 
         function drawClassroomCctv(ctx, w, h, roomId, tickOffset) {
-            if (window.isCctvWebcamActive && window.cctvImgElement && window.cctvImgElement.complete && window.cctvImgElement.naturalWidth > 0) {
-                ctx.drawImage(window.cctvImgElement, 0, 0, w, h);
-                ctx.fillStyle = "rgba(255, 255, 255, 0.7)";
-                ctx.font = "8px 'JetBrains Mono'";
-                ctx.fillText(`REAL_CCTV | LIVE`, 10, 15);
-                return;
-            }
-
             ctx.fillStyle = "#06050e";
             ctx.fillRect(0, 0, w, h);
 
@@ -2239,69 +1626,13 @@
             const ctx = canvas.getContext("2d");
             const w = canvas.width; const h = canvas.height;
 
-            const isWebcamTarget = window.isWebcamActive && (
-                (selectedCandidateId && cand.id === selectedCandidateId) ||
-                (!selectedCandidateId && Object.keys(candidates).length > 0 && cand.id === Object.keys(candidates)[0])
-            );
-
-            if (cand.imgElement && cand.imgElement.complete && cand.imgElement.naturalWidth > 0) {
-                ctx.drawImage(cand.imgElement, 0, 0, w, h);
-                
-                if (cand.status === "danger") {
-                    ctx.strokeStyle = "rgba(239, 68, 68, 0.85)";
-                    ctx.lineWidth = 2;
-                    ctx.strokeRect(w/2 - 40, h/2 - 60, 80, 100);
-                    ctx.fillStyle = "#ef4444"; ctx.font = "bold 9px 'JetBrains Mono'";
-                    ctx.fillText("CRITICAL: PHONE", w/2 - 40, h/2 - 65);
-                } else if (cand.status === "warning") {
-                    ctx.strokeStyle = "rgba(245, 158, 11, 0.85)";
-                    ctx.lineWidth = 2;
-                    ctx.strokeRect(w/2 - 40, h/2 - 60, 80, 100);
-                    ctx.fillStyle = "#f59e0b"; ctx.font = "bold 9px 'JetBrains Mono'";
-                    ctx.fillText("WARNING: GAZE", w/2 - 40, h/2 - 65);
-                }
-            } else if (isWebcamTarget) {
+            if (window.isWebcamActive && cand.id.endsWith('_1')) {
                 const videoEl = document.getElementById('real-webcam');
-                if (videoEl && videoEl.readyState >= 2) {
+                if (videoEl.readyState >= 3) { 
                     ctx.drawImage(videoEl, 0, 0, w, h);
-                    
-                    ctx.fillStyle = "rgba(99, 102, 241, 0.7)";
-                    ctx.font = "bold 8px 'JetBrains Mono'";
-                    ctx.fillText("LOCAL WEBCAM", 10, h - 10);
                 } else {
-                    ctx.fillStyle = "#0a0a14";
+                    ctx.fillStyle = "#000";
                     ctx.fillRect(0, 0, w, h);
-
-                    cand.ticks = (cand.ticks || 0) + 1;
-                    const headAngle = Math.sin(cand.ticks * 0.03) * 3;
-                    
-                    ctx.save();
-                    ctx.translate(w/2, h/2 + 25);
-                    ctx.rotate(headAngle * Math.PI / 180);
-
-                    ctx.strokeStyle = "rgba(255,255,255,0.12)";
-                    ctx.lineWidth = 1.5;
-                    ctx.beginPath();
-                    ctx.moveTo(-50, 40); ctx.quadraticCurveTo(-30, 0, -15, 0);
-                    ctx.lineTo(15, 0); ctx.quadraticCurveTo(30, 0, 50, 40);
-                    ctx.stroke();
-
-                    ctx.strokeStyle = cand.status === "danger" ? "#ef4444" : (cand.status === "warning" ? "#f59e0b" : "rgba(99,102,241,0.8)");
-                    ctx.lineWidth = 2;
-                    ctx.beginPath();
-                    ctx.arc(0, -30, 25, 0, Math.PI * 2);
-                    ctx.stroke();
-
-                    ctx.fillStyle = "rgba(255,255,255,0.8)";
-                    ctx.beginPath(); ctx.arc(-10, -35, 2, 0, Math.PI*2); ctx.fill();
-                    ctx.beginPath(); ctx.arc(10, -35, 2, 0, Math.PI*2); ctx.fill();
-                    
-                    ctx.strokeStyle = "rgba(99,102,241,0.3)";
-                    ctx.lineWidth = 0.5;
-                    ctx.beginPath(); ctx.moveTo(-18, -35); ctx.lineTo(18, -35); ctx.stroke();
-                    ctx.beginPath(); ctx.moveTo(0, -55); ctx.lineTo(0, -5); ctx.stroke();
-                    
-                    ctx.restore();
                 }
             } else {
                 ctx.fillStyle = "#0a0a14";
@@ -2338,6 +1669,20 @@
                 
                 ctx.restore();
             }
+
+            if (cand.status === "danger") {
+                ctx.strokeStyle = "rgba(239, 68, 68, 0.85)";
+                ctx.lineWidth = 2;
+                ctx.strokeRect(w/2 - 40, h/2 - 60, 80, 100);
+                ctx.fillStyle = "#ef4444"; ctx.font = "bold 9px 'JetBrains Mono'";
+                ctx.fillText("CRITICAL: PHONE", w/2 - 40, h/2 - 65);
+            } else if (cand.status === "warning") {
+                ctx.strokeStyle = "rgba(245, 158, 11, 0.85)";
+                ctx.lineWidth = 2;
+                ctx.strokeRect(w/2 - 40, h/2 - 60, 80, 100);
+                ctx.fillStyle = "#f59e0b"; ctx.font = "bold 9px 'JetBrains Mono'";
+                ctx.fillText("WARNING: GAZE", w/2 - 40, h/2 - 65);
+            }
         }
 
         function drawDetailFrontCanvas() {
@@ -2348,49 +1693,12 @@
             const w = detCanvasFront.width;
             const h = detCanvasFront.height;
 
-            const isWebcamTarget = window.isWebcamActive && (cand.id === selectedCandidateId);
-
-            if (cand.imgElement && cand.imgElement.complete && cand.imgElement.naturalWidth > 0) {
-                ctxFront.drawImage(cand.imgElement, 0, 0, w, h);
-            } else if (isWebcamTarget) {
+            if (window.isWebcamActive && cand.id.endsWith('_1')) {
                 const videoEl = document.getElementById('real-webcam');
-                if (videoEl && videoEl.readyState >= 2) {
+                if (videoEl.readyState >= 3) {
                     ctxFront.drawImage(videoEl, 0, 0, w, h);
-                    ctxFront.fillStyle = "rgba(99, 102, 241, 0.7)";
-                    ctxFront.font = "bold 9px 'JetBrains Mono'";
-                    ctxFront.fillText("LOCAL WEBCAM", 10, h - 10);
                 } else {
-                    ctxFront.fillStyle = "#04030d";
-                    ctxFront.fillRect(0, 0, w, h);
-
-                    ctxFront.save();
-                    ctxFront.translate(w/2, h/2 + 20);
-                    const headAngle = Math.sin(cand.ticks * 0.02) * 5;
-                    ctxFront.rotate(headAngle * Math.PI / 180);
-
-                    ctxFront.strokeStyle = cand.status === "danger" ? "#ef4444" : (cand.status === "warning" ? "#f59e0b" : "#6366f1");
-                    ctxFront.lineWidth = 2.5;
-                    ctxFront.beginPath(); ctxFront.arc(0, -35, 45, 0, Math.PI*2); ctxFront.stroke();
-
-                    ctxFront.strokeStyle = "rgba(99,102,241,0.2)";
-                    ctxFront.lineWidth = 0.5;
-                    for (let a=0; a<Math.PI*2; a+=Math.PI/6) {
-                        ctxFront.beginPath(); ctxFront.moveTo(0, -35); ctxFront.lineTo(Math.cos(a)*45, -35 + Math.sin(a)*45); ctxFront.stroke();
-                    }
-
-                    let gazeX = Math.sin(cand.ticks * 0.04) * 3;
-                    let gazeY = Math.cos(cand.ticks * 0.03) * 1.5;
-                    if (cand.status === "warning") { gazeX = -5; gazeY = 5; } 
-                    else if (cand.status === "danger") { gazeX = 8; gazeY = 1; } 
-
-                    ctxFront.fillStyle = "#fff";
-                    ctxFront.beginPath(); ctxFront.arc(-18, -45, 6, 0, Math.PI*2); ctxFront.fill();
-                    ctxFront.beginPath(); ctxFront.arc(18, -45, 6, 0, Math.PI*2); ctxFront.fill();
-                    
-                    ctxFront.fillStyle = cand.status === "safe" ? "var(--success)" : "var(--danger)";
-                    ctxFront.beginPath(); ctxFront.arc(-18 + gazeX, -45 + gazeY, 3, 0, Math.PI*2); ctxFront.fill();
-                    ctxFront.beginPath(); ctxFront.arc(18 + gazeX, -45 + gazeY, 3, 0, Math.PI*2); ctxFront.fill();
-                    ctxFront.restore();
+                    ctxFront.fillStyle = "#000"; ctxFront.fillRect(0,0,w,h);
                 }
             } else {
                 ctxFront.fillStyle = "#04030d";
@@ -2439,24 +1747,6 @@
              const ctx = ctxScreen;
              const w = detCanvasScreen.width;
              const h = detCanvasScreen.height;
-             
-             if (cand.screenImage) {
-                 if (!cand.screenImgElement) {
-                     cand.screenImgElement = new Image();
-                 }
-                 if (cand.screenImgElement.src !== cand.screenImage) {
-                     cand.screenImgElement.src = cand.screenImage;
-                 }
-                 if (cand.screenImgElement.complete && cand.screenImgElement.naturalWidth > 0) {
-                     ctx.drawImage(cand.screenImgElement, 0, 0, w, h);
-                     if (cand.status === "danger") {
-                         ctx.fillStyle = "rgba(239, 68, 68, 0.2)";
-                         ctx.fillRect(0,0,w,h);
-                         ctx.strokeStyle = "#ef4444"; ctx.lineWidth=3; ctx.strokeRect(0,0,w,h);
-                     }
-                     return;
-                 }
-             }
              
              ctx.fillStyle = "#1e1e1e"; 
              ctx.fillRect(0,0,w,h);
@@ -2549,7 +1839,6 @@
         }
 
         function appendAlert(roomId, candId, message, severity) {
-            if (!roomId || !roomsData[roomId]) return;  // Guard: invalid roomId
             const time = getTimestamp();
             if (roomsData[roomId].candidates[candId]) {
                 roomsData[roomId].candidates[candId].logs.push({ time, text: message, type: severity });
@@ -2864,82 +2153,11 @@
             document.getElementById("live-clock").innerText = new Date().toLocaleTimeString('vi-VN');
         }, 1000);
 
-        function updateAiConfig() {
-            const confEl = document.getElementById('ai-conf-threshold');
-            const maxDispEl = document.getElementById('ai-max-disappeared');
-            const lookAwayEl = document.getElementById('ai-look-away-time');
-            const gazeEl = document.getElementById('ai-gaze-ratio');
-            const faceEl = document.getElementById('ai-face-conf');
-            
-            if (!confEl || !maxDispEl || !lookAwayEl || !gazeEl || !faceEl) return;
-            
-            const confVal = parseFloat(confEl.value);
-            const maxDispVal = parseFloat(maxDispEl.value);
-            const lookAwayVal = parseFloat(lookAwayEl.value);
-            const gazeVal = parseFloat(gazeEl.value);
-            const faceVal = parseFloat(faceEl.value);
-
-            window.aiConfig.confThreshold = confVal / 100;
-            window.aiConfig.maxDisappearedTime = maxDispVal;
-            window.aiConfig.lookAwayTime = lookAwayVal;
-            window.aiConfig.gazeRatio = gazeVal / 100;
-            window.aiConfig.faceConf = faceVal / 100;
-
-            document.getElementById('ai-conf-threshold-lbl').innerText = `${confVal}%`;
-            document.getElementById('ai-gaze-ratio-lbl').innerText = `${gazeVal}%`;
-            document.getElementById('ai-face-conf-lbl').innerText = `${faceVal}%`;
-        }
-
-        function restoreDefaultAiConfig() {
-            const confEl = document.getElementById('ai-conf-threshold');
-            const maxDispEl = document.getElementById('ai-max-disappeared');
-            const lookAwayEl = document.getElementById('ai-look-away-time');
-            const gazeEl = document.getElementById('ai-gaze-ratio');
-            const faceEl = document.getElementById('ai-face-conf');
-            
-            if (confEl) confEl.value = 35;
-            if (maxDispEl) maxDispEl.value = 3;
-            if (lookAwayEl) lookAwayEl.value = 3;
-            if (gazeEl) gazeEl.value = 85;
-            if (faceEl) faceEl.value = 70;
-            
-            updateAiConfig();
-            showToast('Đã khôi phục thông số AI mặc định.');
-        }
-
-        window.onload = async () => {
+        window.onload = () => {
             navigate('cctv-overview-view');
             animate();
-            updateAiConfig();
-            
-            // Connect to student streams WebSocket
-            startWebSocketProctoring();
-            
-            // Still enumerate dashboard cameras in case admin wants to use CCTV mode
-            await enumerateDashboardCameras();
-            
-            // Automatically start local webcam on dashboard load
-            await startWebcam();
-            
             setTimeout(triggerRandomIncident, 5000);
         };
-
-
-
-        if (navigator.mediaDevices && navigator.mediaDevices.addEventListener) {
-            navigator.mediaDevices.addEventListener('devicechange', async () => {
-                console.log("Thiết bị camera thay đổi. Đang quét lại...");
-                const oldCctvDeviceId = document.getElementById("cctv-camera-select")?.value;
-                await enumerateDashboardCameras();
-                const newCctvDeviceId = document.getElementById("cctv-camera-select")?.value;
-                
-                // Tự động nhận diện và kích hoạt camera mới (như Iriun được kết nối)
-                if (!window.isWebcamActive || !window.isCctvWebcamActive || oldCctvDeviceId !== newCctvDeviceId) {
-                    console.log("Tự động nhận diện cấu hình camera mới...");
-                    await startWebcam();
-                }
-            });
-        }
     </script>
 </body>
 </html>
